@@ -387,16 +387,30 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # octave lift on the pickup into the next bar; on the
                     # bounce and octave patterns every second hit jumps too,
                     # which is the classic house "bouncing" bassline
-                    lift = step >= 15 or (name in ("bass_bounce", "bass_oct") and k % 2 == 1)
+                    pulse = name == "bass_pulse"
+                    lift = step >= 15 or (name in ("bass_bounce", "bass_oct", "bass_pulse") and k % 2 == 1)
                     note = chord.bass + (12 if lift else 0)
                     dur = clock.dur(steps) / sr + 0.06
                     if muted(step):
                         continue
-                    b = I.bass(midi_to_hz(note), dur, sr,
-                               cutoff=340.0 + 260.0 * sec.energy,
-                               res=1.7, saw_level=0.42 + 0.22 * sec.energy,
-                               drive=1.5 + 0.3 * sec.energy,
-                               seed=83 + bar * 3 + step)
+                    if pulse:
+                        # The octave pulse has to be short and bright to read
+                        # as a pulse rather than a bassline: a fast filter
+                        # envelope and no legato, so every 8th is a separate
+                        # event the ear can count.
+                        dur = clock.dur(1) / sr + 0.05
+                        b = I.bass(midi_to_hz(note), dur, sr,
+                                   cutoff=520.0 + 420.0 * sec.energy,
+                                   res=1.9, env_amount=3.0, decay=0.06,
+                                   saw_level=0.62 + 0.2 * sec.energy,
+                                   drive=1.7 + 0.3 * sec.energy,
+                                   seed=83 + bar * 3 + step)
+                    else:
+                        b = I.bass(midi_to_hz(note), dur, sr,
+                                   cutoff=340.0 + 260.0 * sec.energy,
+                                   res=1.7, saw_level=0.42 + 0.22 * sec.energy,
+                                   drive=1.5 + 0.3 * sec.energy,
+                                   seed=83 + bar * 3 + step)
                     mx.channels["bass"].add(
                         b * vel, place("bass", bar, step, swung=False, jitter=0))
                     # sine sub under the root notes only (never the octave
@@ -477,6 +491,23 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                 v = I.vox_chop(midi_to_hz(note), clock.dur(10) / sr, sr,
                                vowel=vowel, seed=137 + bar, decay=0.45)
                 mx.channels["vox"].add(v * 0.9, place("vox", bar, 2, jitter=0))
+
+            # ---------------- vocal chops as percussion --------------------
+            # Short syllables on off-beats and pickups, alternating two
+            # patterns per bar pair and two vowels, ducked hard. They are a
+            # rhythm part that happens to be a voice, not a vocal.
+            if part_state(sec, "vox_rhythm", lb) and not is_hole and not is_mini:
+                pat = "vox_rhythm" if lb % 2 == 0 else "vox_rhythm2"
+                for step, vel in pattern_hits(pat):
+                    if muted(step):
+                        continue
+                    vowel = "uh" if step % 8 < 4 else "ah"
+                    note = chord.voicing[(step // 3) % 4]
+                    v = I.vox_chop(midi_to_hz(note), 0.13, sr, vowel=vowel,
+                                   seed=137 + bar * 7 + step, decay=0.09)
+                    mx.channels["vox"].add(v * vel * 0.8,
+                                           place("vox", bar, step, jitter=1.5),
+                                           pan=0.35 if step % 2 else -0.35)
 
             # ---------------- background notes ----------------------------
             # A soft 16th-note texture under nearly everything. The note
@@ -722,7 +753,7 @@ def build_mixer(n, sr, fcurve):
     mx.channel("rim", gain_db=-18.5, pan=-0.44, hp=430.0,
                sends={"room": 0.22, "delay": 0.12}, filter_curve=fcurve)
 
-    mx.channel("stab", gain_db=-10.2, width=1.30, duck=0.62, hp=170.0,
+    mx.channel("stab", gain_db=-10.2, width=1.30, duck=0.70, hp=170.0,
                eq=[F.peaking(430.0, -1.7, 1.0, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
                            drive=4.8, mix=1.40, mode="tube"),
@@ -731,7 +762,7 @@ def build_mixer(n, sr, fcurve):
                sends={"plate": 0.30, "delay": 0.18, "room": 0.08},
                filter_curve=fcurve)
 
-    mx.channel("pad", gain_db=-16.4, width=1.50, duck=0.55, hp=150.0,
+    mx.channel("pad", gain_db=-15.8, width=1.50, duck=0.80, hp=150.0,
                eq=[F.peaking(330.0, -2.2, 0.9, sr),
                    F.highshelf(9000.0, 1.5, 0.7, sr)],
                excite=dict(band=(700.0, 2400.0), keep_above=2500.0,

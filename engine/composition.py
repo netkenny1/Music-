@@ -182,6 +182,16 @@ P = {
     "conga_b":     "..x.x..x..x...x.",
     # Continuous background notes.
     "texture":     "xxxxxxxxxxxxxxxx",
+
+    # --- reference-driven ---------------------------------------------------
+    # Pulsing octave bass on driving 8ths (root, octave, root, octave): the
+    # disco / synthwave-house engine under "Take My Breath". The sequencer
+    # alternates the octave per hit; the pattern just supplies the pulse.
+    "bass_pulse":  "x.x.x.x.x.x.x.x.",
+    # Vocal chops used as percussion, tech-house style: short syllables on
+    # the off-beats and pickups, never on the downbeat.
+    "vox_rhythm":  "...x..x...x.x..x",
+    "vox_rhythm2": ".x....x..x....x.",
 }
 
 # Background-note orders, indexed by 8-bar cycle. Each is a permutation of
@@ -253,8 +263,8 @@ def build_sections():
         bass="bass", stab="stab", pad=True, rim=True, crash_at=[0, 8],
         sub_drop=True, sub_layer=True,
         hat_cycle=["hat", "hat_bounce", "hat", "hat_roll"], hat_cycle_bars=2,
-        bass_cycle=["bass", "bass_bounce"], bass_cycle_bars=8,
-        tamb="tamb", conga=True, texture=True,
+        bass_cycle=["bass", "bass_pulse"], bass_cycle_bars=8,
+        tamb="tamb", conga=True, texture=True, vox_rhythm=True,
         # subtle drop: the top pulled for one bar, then everything back
         mini_drop_bars=[8],
         # first violations, used sparingly: the groove is still being taught
@@ -274,7 +284,7 @@ def build_sections():
 
     # --- 8 bars: second build. Snare roll, riser, everything tightening. ---
     add("build2", 8, 0.75,
-        kick=True, hat="hat", shaker=True, bass="bass_simple",
+        kick=True, hat="hat", shaker=True, bass="bass_pulse",
         pad=True, stab="stab", snare_roll=True, riser=True,
         clap="clap", filter_sweep=(2500, 18000),
         texture=True, tamb="tamb_16", conga=True,
@@ -291,8 +301,8 @@ def build_sections():
         counter=True, counter_from=12,
         sub_drop=True, sub_layer=True, fill_bars=[7, 15, 23],
         hat_cycle=["hat", "hat_bounce", "hat_roll", "hat_bounce"], hat_cycle_bars=2,
-        bass_cycle=["bass_busy", "bass_bounce", "bass_oct"], bass_cycle_bars=8,
-        tamb="tamb", conga=True, texture=True, bells=True,
+        bass_cycle=["bass_pulse", "bass_bounce", "bass_pulse"], bass_cycle_bars=8,
+        tamb="tamb", conga=True, texture=True, bells=True, vox_rhythm=True,
         # subtle drops at 4 and 20, a loud one at 12 -- so the 24 bars
         # never run more than 8 without something giving way or landing
         mini_drop_bars=[4, 20], impact_bars=[12],
