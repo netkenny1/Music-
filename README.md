@@ -39,6 +39,13 @@ every core by default. The strips are independent until the sum, so the
 parallel result is bit-identical to the serial one, not merely close --
 verified with `np.array_equal` on the master output.
 
+Measured on four cores: a full render went from 434 s to 196 s (2.2x). The
+strips themselves went from ~290 s to ~75 s; what remains is sequencing
+(40 s) and the master chain (~70 s), both still single-process. A stage
+profile is what decided this -- instrument synthesis turned out to be under
+10% of the total, so the on-disk instrument cache that seemed like the obvious
+first move was never built.
+
 ## How it is built
 
 Signal flow, top to bottom:
