@@ -323,6 +323,7 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         # harmonics instead, so the master only has to tilt, not rescue.
         F.peaking(4000.0, 2.4, 0.7, sr),
         F.highshelf(9000.0, 3.2, 0.7, sr),     # air
+        F.highshelf(14000.0, 1.5, 0.6, sr),    # the top octave
     )
 
     before = float(np.max(np.abs(y)))

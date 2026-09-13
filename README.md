@@ -311,6 +311,22 @@ band, and the stereo image shifts 0.8 dB right when it enters.
 The 16-bar beat-only intro and outro are deliberate: a DJ needs unambiguous
 kick with no melodic content to align against the outgoing track.
 
+## DJ notes
+
+| | |
+|---|---|
+| Tempo | 124 BPM, grid-locked (kick is never micro-shifted) |
+| Key | F minor — Camelot **4A** (mix with 3A, 5A, 4B) |
+| Mix-in | bars 0–15 (0:00–0:31): kick, hats, filtered — no melodic content to clash |
+| First drop | bar 24 (0:46) |
+| Breakdown | bars 40–55 (1:17–1:48): kick out from bar 40, back at bar 48 |
+| Main drop | bar 64 (**2:04**) — the delayed drop: the downbeat is withheld and the kick enters early on the last 8th, so a beatmatched blend across this bar will feel it |
+| Mix-out | bars 88–103 (2:50–3:21): elements peel away, filter closes, bass out at bar 96, kick to bar 102 |
+| Loudness | −9.8 LUFS integrated, −1.0 dBTP — club level; streaming platforms will turn it down to −14, which is normal for dance masters |
+
+The MP3 carries `TBPM` and `TKEY` tags so Rekordbox, Serato and Traktor pick
+the tempo and key up on import rather than guessing.
+
 ## Harmony
 
 `Fm9 → Dbmaj7 → Abmaj7 → Ebadd9` (i – VI – III – VII), two bars each.

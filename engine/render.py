@@ -103,8 +103,8 @@ def build_filter_curve(clock, n, sr=SR):
 # track has no arc -- measured loudness range collapses to under 3 LU, which
 # is what "loud but boring" sounds like on a meter.
 SECTION_GAIN = {
-    "intro": 0.68, "build1": 0.84, "drop1": 1.00, "break": 0.61,
-    "build2": 0.88, "drop2": 1.00, "outro": 0.78,
+    "intro": 0.64, "build1": 0.84, "drop1": 1.00, "break": 0.56,
+    "build2": 0.88, "drop2": 1.00, "outro": 0.74,
 }
 
 
@@ -373,7 +373,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                             cutoff=2200.0 + 2600.0 * sec.energy, voices=5,
                             detune=12.0, attack=1.1, release=1.5,
                             seed=103 + bar)
-                mx.channels["pad"].add(top * (0.26 + 0.16 * sec.energy),
+                mx.channels["pad"].add(top * (0.30 + 0.20 * sec.energy),
                                        clock.at(bar) - int(0.05 * sr))
 
             # ---------------- breakdown keys ------------------------------
@@ -607,10 +607,12 @@ def build_mixer(n, sr, fcurve):
 
     mx.channel("hat", gain_db=-11.5, pan=0.13, width=1.15, hp=420.0,
                eq=[F.peaking(7000.0, 2.0, 0.9, sr),
-                   F.highshelf(10000.0, 2.0, 0.7, sr)],
+                   F.highshelf(10000.0, 2.0, 0.7, sr),
+                   F.highshelf(13500.0, 1.8, 0.6, sr)],
                sends={"room": 0.12}, filter_curve=fcurve)
 
     mx.channel("ohat", gain_db=-13.0, pan=-0.20, width=1.22, hp=420.0,
+               eq=[F.highshelf(12000.0, 1.6, 0.6, sr)],
                duck=0.30, sends={"room": 0.16}, filter_curve=fcurve)
 
     mx.channel("shaker", gain_db=-18.0, pan=0.40, width=1.1, hp=2500.0,
@@ -666,7 +668,7 @@ def build_mixer(n, sr, fcurve):
 
     # Opposite side from the hook (-0.16), higher and drier, so the two
     # lines read as a conversation rather than a doubling.
-    mx.channel("counter", gain_db=-16.8, pan=0.26, width=1.1, duck=0.35,
+    mx.channel("counter", gain_db=-14.8, pan=0.26, width=1.1, duck=0.35,
                hp=520.0, eq=[F.peaking(2600.0, 1.5, 0.9, sr)],
                excite=dict(band=(1200.0, 4000.0), keep_above=3200.0,
                            drive=4.4, mix=1.10, mode="tube"),
@@ -715,7 +717,21 @@ def write_wav(path, x, sr, bits=24):
     return path
 
 
-def encode_mp3(wav_path, mp3_path, bitrate="320k"):
+# Tags a DJ's software reads. Rekordbox, Serato and Traktor all key their
+# libraries on BPM and initial key; without them the track has to be
+# re-analysed on import, and the analysers are not always right about the key.
+MP3_TAGS = {
+    "title": "Midnight Transit",
+    "genre": "House",
+    "TBPM": str(int(C.BPM)) if float(C.BPM).is_integer() else str(C.BPM),
+    "TKEY": "Fm",                       # F minor -- Camelot 4A
+    "date": "2026",
+    "comment": "124 BPM, F minor (Camelot 4A). 16-bar beat intro and outro "
+               "for mixing. Synthesised entirely in code.",
+}
+
+
+def encode_mp3(wav_path, mp3_path, bitrate="320k", artist=None):
     """
     Encode a 320 kbps MP3 via ffmpeg, if it is available.
 
@@ -729,9 +745,14 @@ def encode_mp3(wav_path, mp3_path, bitrate="320k"):
     if not shutil.which("ffmpeg"):
         print("  (ffmpeg not found -- skipping MP3)")
         return None
+    tags = dict(MP3_TAGS)
+    if artist:
+        tags["artist"] = artist
+    meta = [a for k, v in tags.items() for a in ("-metadata", f"{k}={v}")]
     r = subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", wav_path,
-         "-codec:a", "libmp3lame", "-b:a", bitrate, mp3_path],
+         "-codec:a", "libmp3lame", "-b:a", bitrate, "-id3v2_version", "3",
+         *meta, mp3_path],
         capture_output=True, text=True)
     if r.returncode != 0:
         print(f"  (MP3 encode failed: {r.stderr.strip()[:200]})")
@@ -806,6 +827,8 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--bars", default=None, metavar="A-B",
                     help="render only bars A..B-1, e.g. 64-88 for the main drop")
+    ap.add_argument("--artist", default=None,
+                    help="artist name written into the MP3 tags")
     ap.add_argument("--serial", action="store_true",
                     help="single-process mixing (for timing comparisons)")
     args = ap.parse_args()
@@ -836,7 +859,7 @@ def main():
     cd = np.clip(cd, -db(-1.0), db(-1.0))
     outputs.append(write_wav(f"{stem}_master_16bit_44k.wav", cd, 44100, 16))
 
-    mp3 = encode_mp3(outputs[0], f"{stem}.mp3")
+    mp3 = encode_mp3(outputs[0], f"{stem}.mp3", artist=args.artist)
     if mp3:
         outputs.append(mp3)
 
