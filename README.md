@@ -61,6 +61,7 @@ oscillators ─▶ filters ─▶ envelopes ─▶ instrument voices
 |---|---|
 | `instruments.py` | 21 synthesised voices: drums, bass, chords, pads, ear candy |
 | `composition.py` | Tempo, key, chord progression, rhythm patterns, song structure |
+| `groove.py` | Syncopation scoring, micro-timing, polyrhythm and stutter schedules |
 | `mixer.py` | Channel strips, effect sends, master chain |
 | `render.py` | Sequencer and entry point |
 | `analysis.py` | LUFS / true-peak / correlation metering (ITU-R BS.1770-4) |
@@ -104,6 +105,103 @@ running minimum, so the limiter is already turned down before a transient
 arrives. Because the minimum's radius is wider than the smoothing radius, the
 smoothing can never reintroduce an overshoot — no clipping stage is needed to
 catch it.
+
+## Expectation and its violation
+
+A groove that is perfectly predictable stops being interesting, and one that is
+unpredictable stops being a groove. The pleasurable middle is measurable.
+
+**Syncopation, scored.** `groove.py` implements the Longuet-Higgins & Lee (1984)
+index: every position in the bar carries a metrical weight (the downbeat
+strongest, the odd 16ths weakest), and a syncopation is counted whenever a
+*rest* at a strong position follows a *note* at a weaker one. The note is heard
+as displaced onto the silence where the strong beat should have been.
+
+```
+weights   0 -4 -3 -4 -2 -4 -3 -4 -1 -4 -3 -4 -2 -4 -3 -4
+```
+
+Witek et al. (2014) found the relationship between this index and the urge to
+move is an inverted U: too little is dull, too much is unreadable, and medium
+syncopation peaks. The track is written to sit on that peak and to step off it
+deliberately at chosen moments.
+
+**What the measurement actually showed.** Scoring the track's combined drum
+*accents* gave **0**. That is not a bug — it is a fact about four-to-the-floor
+house. The continuous 16th hat articulates every metrical position, so there is
+no rest anywhere for a syncopation to be defined against. A saturated kit
+surface cannot be syncopated by adding events to it; the only way in is to
+*remove* them. That measurement is what justified the approach below.
+
+| Surface | drop1 | drop2 | violation bar |
+|---|---|---|---|
+| Kick grid | `xxx.xxx.xxx.xxx.` — 0 | `xxx.xxx.xxx.xxx.` — 0 | `..xxx.xxx.xxx.x.` — **3** |
+| Bass / chords | 8 | 7 | **11** |
+
+So the kit stays deliberately square and the syncopation lives in the bass and
+chord parts, where it rises from 7–8 to 11 on violation bars.
+
+**Micro-timing is not swing.** Swing is a fixed ratio applied to every 16th.
+Micro-timing is a per-instrument offset in milliseconds that stays constant, and
+it is what separates a machine from a player. The kick is pinned to the grid at
+exactly 0.0 ms — it is the reference everything else is heard against — and the
+other parts are pushed or pulled around it:
+
+```
+kick    0.0 ms      bass   -4.0 ms      stab   +3.0 ms
+clap   +9.0 ms      ohat   +5.0 ms      shaker +7.0 ms      vox +8.0 ms
+```
+
+The bass leans early, so it pulls the groove forward. The clap sits nearly 10 ms
+late, which is what makes a backbeat feel relaxed rather than rushed.
+
+**The violations themselves.** Eighteen are placed and catalogued
+(`composition.violation_report()`), sparse in drop1 and dense in drop2 so the
+listener learns the rule before it is broken:
+
+| Bar | Event | What happens |
+|---|---|---|
+| 31 | missing kick | beat-3 kick removed |
+| 35 | pushed clap | backbeat arrives a 16th early |
+| 39 | stutter | accelerating stab retrigger from step 12 |
+| 63 | silence | everything stops from step 12 |
+| 64 | **delayed drop** | downbeat withheld; kick enters early on the last 8th |
+| 69 | anticipated bass | bass lands before the beat and holds through it |
+| 72 | polyrhythm | 3-against-4 layer, realigns every 3 bars |
+| 73 | late chord | stab lands after the beat |
+| 79 | missing kick | downbeat kick removed |
+| 87 | stutter | accelerating arp retrigger from step 8 |
+
+**The delayed drop** is the strongest of them, and it is two violations in
+opposite directions inside one bar. Bar 63 cuts everything from step 12, leaving
+the riser alone. Bar 64 then withholds the downbeat the entire build promised —
+no kick, just a sub drop and a reverse crash. The bar empties out. Then the kick
+arrives *early*, on the last 8th, pre-empting the next downbeat. The beat first
+fails to appear where predicted, then appears where it was not.
+
+Measured on the master, low band under 90 Hz:
+
+```
+bar 63 step 15   hats -46.1 dB, low -34.4 dB     the gap
+bar 64 step  0   -14.8 dB      no kick (real downbeats read -10 dB)
+bar 64 step 12   -22.2 dB      the bar has hollowed out
+bar 64 step 14   -11.5 dB      the early kick, full level
+bar 65 step  0   -10.1 dB      normal service resumes
+```
+
+**Stutters.** `instruments.stutter()` re-triggers the *attack* of a source on an
+accelerating schedule — each repeat is shorter, slightly louder, optionally
+pitched up. A constant-rate repeat is quickly learned and predicted; one that
+accelerates keeps the listener's timing model permanently behind, and the
+downbeat that follows resolves the whole accumulation at once.
+
+**Why any of this works.** Salimpoor et al. (2011) tied musical pleasure to
+dopamine release in the striatum, and the striatal signal tracks *prediction
+error* rather than stimulus intensity. Predictive-coding accounts of groove
+(Vuust & Witek) make the mechanism concrete: the brain continuously predicts the
+next onset, a violation produces an error signal, and resolution back onto the
+grid is the reward. A track with no violations generates no error and no reward.
+The engineering job is to place the errors where they will be resolved.
 
 ## Arrangement
 

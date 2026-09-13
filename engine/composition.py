@@ -131,6 +131,31 @@ P = {
     "stab_synco":  "..x..x..x.x...x.",
 
     "rim":         "......x.......o.",
+
+    # --- patterns built to syncopate -------------------------------------
+    # The originals articulate every strong beat, which measures as zero
+    # syncopation no matter how busy they look. These deliberately leave
+    # quarter-note positions empty so earlier notes hold through them.
+
+    # Kick with beat 3 missing. The pulse is established well enough by then
+    # that the ear supplies the absent hit -- and feels its absence.
+    "kick_hole3":  "X...x.......x...",
+    # Kick with the DOWNBEAT missing. Only usable once, deep into a drop.
+    "kick_hole1":  "....x...x...x...",
+
+    # Thinner hats: accents on the offbeats only, so the quarter notes are
+    # left to the kick rather than being doubled.
+    "hat_thin":    "..X...X...X...X.",
+    "hat_synco":   "o.X..o.X.o..X.o.",
+
+    # Bass landing a 16th BEFORE the beat and holding through it.
+    "bass_ante":   ".x.....x.....x..",
+    "bass_synco":  "..x..x.....x..x.",
+
+    # Chord stab that lands late and holds over the next strong beat.
+    "stab_late":   "...x.....x....x.",
+    # Clap pushed a 16th early -- arrives before the ear expects beat 2/4.
+    "clap_push":   "...x.......x....",
     "arp":         "x.x.x.x.x.x.x.x.",
     "arp_dense":   "xxxxxxxxxxxxxxxx",
 }
@@ -190,7 +215,11 @@ def build_sections():
     add("drop1", 16, 0.90,
         kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
         bass="bass", stab="stab", pad=True, rim=True, crash_at=[0, 8],
-        sub_drop=True)
+        sub_drop=True,
+        # first violations, used sparingly: the groove is still being taught
+        kick_pattern_bars={7: "kick_hole3"},
+        clap_push_bars=[11],
+        stutter_at=[(15, 12, "stab")])
 
     # --- 16 bars: breakdown. Kick drops out for 8 bars, harmony takes over.
     add("break", 16, 0.45,
@@ -203,14 +232,29 @@ def build_sections():
     add("build2", 8, 0.75,
         kick=True, hat="hat", shaker=True, bass="bass_simple",
         pad=True, stab="stab", snare_roll=True, riser=True,
-        clap="clap", filter_sweep=(2500, 18000))
+        clap="clap", filter_sweep=(2500, 18000),
+        stutter_at=[(7, 8, "stab")],
+        # total silence on the last beat. The riser stops, everything stops,
+        # and the listener is left holding a prediction with nothing to meet it.
+        silence_from=(7, 12))
 
     # --- 24 bars: main drop. Full arrangement plus arpeggio and vocals. ----
     add("drop2", 24, 1.00,
         kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
         bass="bass_busy", stab="stab_synco", pad=True, rim=True,
-        arp=True, vox=True, melody=True, crash_at=[0, 8, 16],
-        sub_drop=True, fill_bars=[7, 15, 23])
+        arp=True, vox=True, melody=True, crash_at=[8, 16],
+        sub_drop=True, fill_bars=[7, 15, 23],
+        # THE DELAYED DROP. Bar 0 of the drop is a hole: no kick, no groove,
+        # just a sub and the tail of the build hanging in the air. The kick
+        # then arrives EARLY, on the last 8th of the bar, so the beat both
+        # fails to arrive when expected and then pre-empts the next downbeat.
+        hole_bar=0,
+        kick_pattern_bars={7: "kick_hole3", 15: "kick_hole1", 19: "kick_hole3"},
+        clap_push_bars=[11, 19],
+        bass_ante_bars=[5, 13, 21],
+        stab_late_bars=[9, 17],
+        poly_from=8,
+        stutter_at=[(23, 8, "arp")])
 
     # --- 16 bars: DJ outro. Elements peel away, filter closes. -------------
     add("outro", 16, 0.35,
@@ -244,6 +288,77 @@ MELODY = [
 ]
 
 
+def groove_report():
+    """
+    Measure syncopation, and be honest about what the number means.
+
+    Two surfaces are reported, because they say different things:
+
+    * **Full kit.** In four-to-the-floor house this is near zero by design and
+      that is correct, not a failure. A continuous 16th hat plus a kick on
+      every quarter articulates every metrical position, so nothing is ever
+      left hanging. That saturation is exactly what makes the genre danceable:
+      it is the stable grid the violations are heard against.
+
+    * **Bass and chords.** This is where bar-level syncopation actually lives
+      in house, and it is where the index is worth reading.
+
+    The structural violations -- the delayed drop, a missing downbeat, an
+    accelerating stutter, a bar of silence -- do not show up in either number.
+    They operate across phrases, not within a bar, and they are counted
+    separately below.
+    """
+    import groove as G
+
+    kit, mel = [], []
+    for name, drums, tuned in [
+        ("drop1", ["kick", "clap_ghost", "hat", "ohat"], ["bass", "stab"]),
+        ("drop2", ["kick", "clap_ghost", "hat", "ohat"],
+                  ["bass_busy", "stab_synco"]),
+        ("violation bar", ["kick_hole1", "clap_push", "hat_synco", "ohat"],
+                          ["bass_ante", "stab_late"]),
+    ]:
+        k = G.combine(*[P[x] for x in drums], accents_only=True)
+        m = G.combine(*[P[x] for x in tuned], accents_only=True)
+        kit.append((name, k, G.syncopation(k)))
+        mel.append((name, m, G.syncopation(m)))
+    return kit, mel
+
+
+def violation_report():
+    """Count the structural expectation violations, and where they land."""
+    events = []
+    for sec in SECTIONS:
+        p = sec.parts
+        if p.get("hole_bar") is not None:
+            events.append((sec.start + p["hole_bar"], "delayed drop",
+                           "downbeat withheld; kick enters early on the last 8th"))
+        for lb, pat in p.get("kick_pattern_bars", {}).items():
+            what = ("downbeat kick removed" if pat == "kick_hole1"
+                    else "beat-3 kick removed")
+            events.append((sec.start + lb, "missing kick", what))
+        for lb in p.get("clap_push_bars", []):
+            events.append((sec.start + lb, "pushed clap",
+                           "backbeat arrives a 16th early"))
+        for lb in p.get("bass_ante_bars", []):
+            events.append((sec.start + lb, "anticipated bass",
+                           "bass lands before the beat and holds through it"))
+        for lb in p.get("stab_late_bars", []):
+            events.append((sec.start + lb, "late chord",
+                           "stab lands after the beat"))
+        for (lb, step, part) in p.get("stutter_at", []):
+            events.append((sec.start + lb, "stutter",
+                           f"accelerating {part} retrigger from step {step}"))
+        if p.get("silence_from"):
+            lb, step = p["silence_from"]
+            events.append((sec.start + lb, "silence",
+                           f"everything stops from step {step}"))
+        if p.get("poly_from") is not None:
+            events.append((sec.start + p["poly_from"], "polyrhythm",
+                           "3-against-4 layer, realigns every 3 bars"))
+    return sorted(events)
+
+
 def describe():
     """Human-readable summary of the arrangement."""
     lines = [
@@ -265,3 +380,17 @@ def describe():
 
 if __name__ == "__main__":
     print(describe())
+    print()
+    kit, mel = groove_report()
+    print("Syncopation, Longuet-Higgins & Lee index of the accent surface:")
+    print("  full kit (saturated by design -- near zero is correct):")
+    for name, surf, idx in kit:
+        print(f"    {name:14s} {surf}  index {idx:3d}")
+    print("  bass + chords (where syncopation lives in house):")
+    for name, surf, idx in mel:
+        print(f"    {name:14s} {surf}  index {idx:3d}")
+    print()
+    print("Structural expectation violations:")
+    for bar, kind, detail in violation_report():
+        t = bar * 4 * 60 / BPM
+        print(f"  {int(t)//60}:{int(t)%60:02d}  bar {bar:3d}  {kind:18s} {detail}")

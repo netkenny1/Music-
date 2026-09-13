@@ -441,3 +441,60 @@ def noise_sweep(dur, sr=SR, up=True, seed=167, lo=300.0, hi=12000.0):
     x = F.apply(x, F.highpass(250.0, 0.707, sr))
     env = np.sin(np.pi * prog) ** 1.3
     return fade(x * env, sr, 0.01, 0.02)
+
+
+# ==========================================================================
+# Beat repeat
+# ==========================================================================
+
+def stutter(src, sr=SR, step_seconds=0.12, schedule=None, pitch_rise=0.0,
+            gain_rise=0.45, fade=0.0025):
+    """
+    Beat-repeat: retrigger the head of `src` at accelerating intervals.
+
+    Each repeat replays the *attack* of the source, not a continuation of it,
+    which is what makes a stutter read as a machine seizing rather than a
+    performance. `schedule` gives slice lengths in 16th notes; an accelerating
+    schedule means every repeat arrives sooner than predicted, so prediction
+    error accumulates across the fill instead of resetting each time. The
+    downbeat that finally lands resolves all of it at once.
+
+    `pitch_rise` reads the source progressively faster, lifting the pitch as
+    the fill tightens -- a second, independent rising cue layered on the first.
+    """
+    if schedule is None:
+        schedule = [1.0, 1.0, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25]
+
+    mono = src.ndim == 1
+    total = int(sum(schedule) * step_seconds * sr) + 128
+    out = np.zeros(total) if mono else np.zeros((total, 2))
+    src_idx = np.arange(len(src))
+
+    pos = 0
+    last = max(1, len(schedule) - 1)
+    for i, d in enumerate(schedule):
+        n = int(d * step_seconds * sr)
+        if n < 8:
+            continue
+        prog = i / last
+        rate = 1.0 + pitch_rise * prog
+        read = np.arange(n) * rate
+
+        if mono:
+            sl = np.interp(read, src_idx, src, left=0.0, right=0.0)
+        else:
+            sl = np.stack([np.interp(read, src_idx, src[:, c], left=0.0, right=0.0)
+                           for c in range(2)], axis=-1)
+
+        f = min(int(fade * sr), max(1, n // 4))
+        env = np.ones(n)
+        env[:f] = np.linspace(0.0, 1.0, f)
+        env[-f:] = np.linspace(1.0, 0.0, f)
+        g = 1.0 + gain_rise * prog
+
+        sl = sl * (env if mono else env[:, None]) * g
+        end = min(pos + n, total)
+        out[pos:end] += sl[:end - pos]
+        pos += n
+
+    return out

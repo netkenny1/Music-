@@ -20,6 +20,7 @@ from dsp import dynamics as D
 from dsp import space as S
 import instruments as I
 import composition as C
+import groove as G
 from mixer import Mixer, master_chain
 import analysis as A
 
@@ -165,6 +166,18 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
         the ear reads as a person playing."""
         return pos + int(rng.normal(0.0, amount_ms) * sr / 1000.0)
 
+    def place(part, bar, step, swung=True, jitter=1.4):
+        """
+        Sample position for a hit, with swing, micro-timing and jitter.
+
+        Micro-timing is the deliberate part: each instrument sits slightly
+        ahead of or behind the grid (see groove.MICRO_TIMING), which is what
+        separates a groove from a quantised loop. The kick's offset is zero
+        and stays zero -- it is the reference the rest is heard against.
+        """
+        pos = clock.at(bar, step, swung=swung) + G.micro_offset(part, sr)
+        return pos if jitter <= 0 else humanize(pos, jitter)
+
     counters = {k: 0 for k in
                 ("kick", "clap", "hat", "ohat", "shaker", "rim", "snare",
                  "crash", "tom")}
@@ -183,61 +196,131 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
             fills = sec.parts.get("fill_bars", [])
             is_fill = lb in fills
 
+            # --- expectation-violation events for this bar ----------------
+            is_hole = sec.parts.get("hole_bar") == lb
+            silence = sec.parts.get("silence_from")
+            sil_step = silence[1] if (silence and silence[0] == lb) else 16
+
+            def muted(step):
+                """True where the arrangement deliberately stops."""
+                return step >= sil_step
+
+            kick_pat = sec.parts.get("kick_pattern_bars", {}).get(lb)
+            push_clap = lb in sec.parts.get("clap_push_bars", [])
+            ante_bass = lb in sec.parts.get("bass_ante_bars", [])
+            late_stab = lb in sec.parts.get("stab_late_bars", [])
+
+            # ---------------- the delayed drop ----------------------------
+            # The single strongest violation in the track. Everything the
+            # build promised for this downbeat simply does not arrive: no
+            # kick, no groove, just a sub and the tail of the riser hanging
+            # in the air. Then the kick enters EARLY, on the last 8th, so the
+            # beat first fails to appear where predicted and then pre-empts
+            # the next downbeat. Two violations, opposite directions, one bar.
+            if is_hole:
+                mx.channels["sub"].add(I.sub_drop(2.2, sr, f0=120.0) * 0.85,
+                                       clock.at(bar))
+                rc = I.reverse_crash(1.9, sr)
+                mx.channels["fx"].add(rc * 0.55, clock.at(bar + 1) - len(rc))
+                anticip = clock.at(bar, 14)
+                kick_triggers.append(anticip)
+                mx.channels["kick"].add(
+                    cache.pick(cache.kick, nxt("kick")) * 0.9, anticip)
+                mx.channels["ohat"].add(
+                    cache.pick(cache.ohat, nxt("ohat")) * 0.7,
+                    place("ohat", bar, 14))
+
             # ---------------- kick ----------------------------------------
-            if part_state(sec, "kick", lb) is not None:
-                pat = "kick_fill" if is_fill else "kick"
+            if not is_hole and part_state(sec, "kick", lb) is not None:
+                pat = kick_pat or ("kick_fill" if is_fill else "kick")
                 for step, vel in pattern_hits(pat):
-                    pos = clock.at(bar, step)
+                    if muted(step):
+                        continue
+                    pos = clock.at(bar, step)          # never micro-shifted
                     kick_triggers.append(pos)
                     mx.channels["kick"].add(
                         cache.pick(cache.kick, nxt("kick")) * vel, pos)
+                # A missing kick needs something to mark the moment, or it
+                # reads as a mistake rather than a decision.
+                if kick_pat == "kick_hole1":
+                    mx.channels["fx"].add(
+                        cache.pick(cache.crash, nxt("crash")) * 0.42,
+                        clock.at(bar))
 
             # ---------------- clap ----------------------------------------
             cp = part_state(sec, "clap", lb)
-            if cp:
-                name = cp if isinstance(cp, str) else "clap"
+            if cp and not is_hole:
+                # A clap a 16th early arrives before the ear has finished
+                # predicting beat 2 -- the backbeat is still there, just not
+                # where it was promised.
+                name = "clap_push" if push_clap else (cp if isinstance(cp, str) else "clap")
                 for step, vel in pattern_hits(name):
-                    pos = humanize(clock.at(bar, step, swung=True), 1.1)
+                    if muted(step):
+                        continue
                     mx.channels["clap"].add(
                         cache.pick(cache.clap, nxt("clap")) * vel *
-                        rng.uniform(0.93, 1.0), pos)
+                        rng.uniform(0.93, 1.0), place("clap", bar, step, jitter=1.1))
 
             # ---------------- hats ----------------------------------------
             hp = part_state(sec, "hat", lb)
             if hp:
                 name = hp if isinstance(hp, str) else "hat"
                 for step, vel in pattern_hits(name):
-                    pos = humanize(clock.at(bar, step, swung=True), 1.5)
+                    if muted(step):
+                        continue
                     # brightness tracks section energy: quieter sections get
                     # darker hats, which reads as "further away"
                     g = vel * rng.uniform(0.88, 1.06) * (0.72 + 0.35 * sec.energy)
                     mx.channels["hat"].add(
-                        cache.pick(cache.hat, nxt("hat")) * g, pos)
+                        cache.pick(cache.hat, nxt("hat")) * g,
+                        place("hat", bar, step, jitter=1.5))
 
-            if part_state(sec, "ohat", lb):
+            if part_state(sec, "ohat", lb) and not is_hole:
                 for step, vel in pattern_hits("ohat"):
-                    pos = humanize(clock.at(bar, step, swung=True), 1.4)
+                    if muted(step):
+                        continue
                     mx.channels["ohat"].add(
                         cache.pick(cache.ohat, nxt("ohat")) * vel *
-                        rng.uniform(0.9, 1.05), pos)
+                        rng.uniform(0.9, 1.05), place("ohat", bar, step, jitter=1.4))
 
-            if part_state(sec, "shaker", lb):
+            if part_state(sec, "shaker", lb) and not is_hole:
                 for step, vel in pattern_hits("shaker"):
-                    pos = humanize(clock.at(bar, step, swung=True), 2.0)
+                    if muted(step):
+                        continue
                     mx.channels["shaker"].add(
                         cache.pick(cache.shaker, nxt("shaker")) * vel *
-                        rng.uniform(0.82, 1.08), pos)
+                        rng.uniform(0.82, 1.08),
+                        place("shaker", bar, step, jitter=2.0))
 
-            if part_state(sec, "rim", lb) and lb % 2 == 1:
+            if part_state(sec, "rim", lb) and lb % 2 == 1 and not is_hole:
                 for step, vel in pattern_hits("rim"):
-                    pos = humanize(clock.at(bar, step, swung=True), 2.2)
+                    if muted(step):
+                        continue
                     mx.channels["rim"].add(
-                        cache.pick(cache.rim, nxt("rim")) * vel, pos)
+                        cache.pick(cache.rim, nxt("rim")) * vel,
+                        place("rim", bar, step, jitter=2.2))
+
+            # --- 3-against-4 polyrhythm ------------------------------------
+            # A hit every 3 sixteenths against a 16-step bar will not realign
+            # with the downbeat for three bars (lcm(3,16) = 48). The layer
+            # rotates against the pulse and locks back in every third bar --
+            # a slow tension-and-release the listener feels without naming.
+            poly_from = sec.parts.get("poly_from")
+            if poly_from is not None and lb >= poly_from and not is_hole:
+                for pb, pstep in G.polyrhythm_steps(3, 1, offset=(lb * 16) % 3):
+                    if muted(pstep):
+                        continue
+                    mx.channels["rim"].add(
+                        cache.pick(cache.rim, nxt("rim")) * 0.42,
+                        place("rim", bar, pstep, swung=False, jitter=1.0),
+                        pan=0.55)
 
             # ---------------- bass ----------------------------------------
             bp = part_state(sec, "bass", lb)
-            if bp:
-                name = bp if isinstance(bp, str) else "bass"
+            if bp and not is_hole:
+                # The anticipated bass lands a 16th BEFORE the beat and holds
+                # through it, so the downbeat is felt but never struck.
+                name = "bass_ante" if ante_bass else (bp if isinstance(bp, str) else "bass")
                 hits = list(pattern_hits(name))
                 for k, (step, vel) in enumerate(hits):
                     # a note lasts until the next one, so the line is legato
@@ -246,19 +329,24 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                     # octave lift on the pickup into the next bar
                     note = chord.bass + (12 if step >= 15 else 0)
                     dur = clock.dur(steps) / sr + 0.06
+                    if muted(step):
+                        continue
                     b = I.bass(midi_to_hz(note), dur, sr,
                                cutoff=340.0 + 260.0 * sec.energy,
                                res=1.7, saw_level=0.42 + 0.22 * sec.energy,
                                drive=1.5 + 0.3 * sec.energy,
                                seed=83 + bar * 3 + step)
-                    mx.channels["bass"].add(b * vel, clock.at(bar, step))
+                    mx.channels["bass"].add(
+                        b * vel, place("bass", bar, step, swung=False, jitter=0))
 
             # ---------------- chord stabs ---------------------------------
             sp = part_state(sec, "stab", lb)
-            if sp:
-                name = sp if isinstance(sp, str) else "stab"
+            if sp and not is_hole:
+                name = "stab_late" if late_stab else (sp if isinstance(sp, str) else "stab")
                 for step, vel in pattern_hits(name):
-                    pos = clock.at(bar, step, swung=True)
+                    if muted(step):
+                        continue
+                    pos = place("stab", bar, step, jitter=0)
                     st = I.stab([midi_to_hz(m) for m in chord.voicing],
                                 clock.dur(3) / sr + 0.18, sr,
                                 cutoff=2600.0 + 2400.0 * sec.energy,
@@ -282,14 +370,16 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                                seed=113 + bar * 3 + step)
                     mx.channels["keys"].add(
                         k * (1.0 if step == 0 else 0.6),
-                        clock.at(bar, step, swung=True))
+                        place("keys", bar, step, jitter=0))
 
             # ---------------- arpeggio ear candy --------------------------
             if part_state(sec, "arp", lb):
                 notes = chord.arp + chord.arp[-2::-1]      # up then back down
                 for step, vel in pattern_hits("arp"):
+                    if muted(step):
+                        continue
                     note = notes[(step // 2 + lb) % len(notes)]
-                    pos = clock.at(bar, step, swung=True)
+                    pos = place("arp", bar, step, jitter=0)
                     tone = I.bell(midi_to_hz(note), 0.34, sr,
                                   ratio=2.01, index=2.4, decay=0.30,
                                   seed=127 + bar * 7 + step)
@@ -303,7 +393,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                 note = chord.voicing[1] + 12
                 v = I.vox_chop(midi_to_hz(note), clock.dur(10) / sr, sr,
                                vowel=vowel, seed=137 + bar, decay=0.45)
-                mx.channels["vox"].add(v * 0.9, clock.at(bar, 2, swung=True))
+                mx.channels["vox"].add(v * 0.9, place("vox", bar, 2, jitter=0))
 
             # ---------------- melodic hook --------------------------------
             if part_state(sec, "melody", lb):
@@ -313,7 +403,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                     if mbar != bar:
                         continue
                     step = mstep % 16
-                    pos = clock.at(bar, step, swung=True)
+                    pos = place("melody", bar, step, jitter=0)
                     dur = clock.dur(mlen) / sr + 0.25
                     if sec.name == "break":
                         tone = I.keys([midi_to_hz(note)], dur, sr,
@@ -330,11 +420,47 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                 div = [2.0, 2.0, 1.0, 0.5][k]          # 8ths -> 32nds
                 step = 0.0
                 while step < 16:
+                    if muted(step):
+                        break
                     pos = clock.at(bar, step)
                     v = 0.30 + 0.65 * ((k * 16 + step) / 64.0)
                     mx.channels["fx"].add(
                         cache.pick(cache.snare, nxt("snare")) * v * 0.6, pos)
                     step += div
+
+            # ---------------- stutter / beat repeat ------------------------
+            # An accelerating retrigger: each repeat arrives sooner than the
+            # last, so prediction error piles up instead of resetting. The
+            # downbeat that follows resolves the whole accumulation at once.
+            for (sb, sstep, spart) in sec.parts.get("stutter_at", []):
+                if lb != sb:
+                    continue
+                # Stop at the cut, not at the barline. A stutter that runs
+                # through the intended silence fills the very gap it exists
+                # to set up.
+                steps_left = min(16, sil_step) - sstep
+                if steps_left <= 0:
+                    continue
+                sched = G.stutter_schedule(steps_left)
+                step_s = clock.step
+
+                if spart == "stab":
+                    src = I.stab([midi_to_hz(m) for m in chord.voicing],
+                                 0.34, sr, cutoff=2800.0, decay=0.12,
+                                 seed=97 + bar)
+                    ch, gain = "stab", 0.75
+                elif spart == "arp":
+                    src = I.bell(midi_to_hz(chord.arp[1]), 0.30, sr,
+                                 index=2.8, decay=0.24, seed=127 + bar)
+                    ch, gain = "arp", 0.85
+                else:
+                    src = I.vox_chop(midi_to_hz(chord.voicing[1] + 12), 0.36,
+                                     sr, vowel="ah", seed=137 + bar)
+                    ch, gain = "vox", 0.9
+
+                mx.channels[ch].add(
+                    I.stutter(src, sr, step_s, sched, pitch_rise=0.45) * gain,
+                    clock.at(bar, sstep))
 
             # ---------------- transition FX -------------------------------
             for cb in sec.parts.get("crash_at", []):
@@ -352,9 +478,15 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
 
             if part_state(sec, "riser", lb) and lb == sec.length - 4:
                 dur = 4 * clock.bar
-                mx.channels["fx"].add(
-                    I.riser(dur, sr, 240.0, 9000.0, seed=149 + bar) * 0.32,
-                    clock.at(bar))
+                cut = sec.parts.get("silence_from")
+                if cut:
+                    # end the riser exactly where everything else stops, so
+                    # the gap is real silence rather than a held sweep
+                    dur = ((cut[0] - lb) * 16 + cut[1]) * clock.step
+                if dur > 0.2:
+                    mx.channels["fx"].add(
+                        I.riser(dur, sr, 240.0, 9000.0, seed=149 + bar) * 0.32,
+                        clock.at(bar))
 
             if part_state(sec, "downlifter", lb) and lb == 0:
                 mx.channels["fx"].add(
