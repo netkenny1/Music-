@@ -311,6 +311,26 @@ band, and the stereo image shifts 0.8 dB right when it enters.
 The 16-bar beat-only intro and outro are deliberate: a DJ needs unambiguous
 kick with no melodic content to align against the outgoing track.
 
+### Movement inside the sections
+
+Two references shaped the second pass: *Fusion* (Iglesias & Rayzir) for the
+tech-house groove and *Take My Breath* (The Weeknd) for the pulsing synth
+bass and pumping pads.
+
+| Element | What it does |
+|---|---|
+| **Pulsing octave bass** | Root, octave, root, octave on driving 8ths — short and bright so every hit reads as a separate event. Drives build2 and the first and third phrases of the main drop |
+| **Rolling bass** | Off-8th leaning patterns with octave jumps on alternate hits, rotating with the pulse every 8 bars |
+| **Vocal chops as percussion** | Short "uh"/"ah" syllables on off-beats and pickups, never the downbeat, panned alternately, ducked hard |
+| **Background notes** | A continuous 16th pluck texture under nearly everything; its note order rotates every 8 bars and its pan walks slowly across the field |
+| **Tambourine, congas** | New percussion in slots nothing else occupied — jingles above 5 kHz, hand drums at 180–400 Hz in a two-bar call and answer |
+| **Sine sub** | A pure sine under the bass roots in both drops, for the chest |
+| **Bells** | Answer the stabs every fourth bar of the main drop |
+| **Hat rotation** | Four hat patterns cycling every two bars, so the top never sits still |
+| **Stab sweep** | The chord filter climbs across every 8-bar phrase and resets |
+| **Mini-drops** | Every 8 bars or so inside the drops, something gives way (the top of the kit and chords pulled for one bar) or lands (crash and sub impact on a downbeat, announced by a fill). Bars 32, 68, 76, 84, and a half-drop at 48 when the kick returns in the breakdown |
+| **Swing** | 13 % → 19 % on the 16ths; sidechain pump tightened |
+
 ## DJ notes
 
 | | |
