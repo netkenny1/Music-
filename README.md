@@ -286,7 +286,7 @@ fundamental:**
 
 The low end did not move, which is the point: everything was fixed above it,
 at source, and the limiter is doing slightly less work than before (glue comp
--1.5 dB, loudness range 4.57 LU).
+-1.5 dB; the final master sits at 5.0 LU).
 
 **Two musical additions** that happen to fill the same holes: the pad now
 doubles its top voice an octave up, quietly, so 1-3 kHz carries something
@@ -322,7 +322,7 @@ kick with no melodic content to align against the outgoing track.
 | Breakdown | bars 40–55 (1:17–1:48): kick out from bar 40, back at bar 48 |
 | Main drop | bar 64 (**2:04**) — the delayed drop: the downbeat is withheld and the kick enters early on the last 8th, so a beatmatched blend across this bar will feel it |
 | Mix-out | bars 88–103 (2:50–3:21): elements peel away, filter closes, bass out at bar 96, kick to bar 102 |
-| Loudness | −9.89 LUFS integrated, −1.00 dBTP — club level; streaming platforms will turn it down to −14, which is normal for dance masters |
+| Loudness | −10.6 LUFS integrated, −1.00 dBTP — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth, and streaming platforms normalise to −14 anyway |
 
 The MP3 carries `TBPM` and `TKEY` tags so Rekordbox, Serato and Traktor pick
 the tempo and key up on import rather than guessing.
@@ -351,8 +351,8 @@ ITU-R BS.1770-4 loudness, true-peak detection and stereo correlation, and
 
 | Metric | Value | Why it matters |
 |---|---|---|
-| Integrated loudness | ≈ −10 LUFS | Club level; sits alongside commercial dance masters |
-| Loudness range | ≈ 4.6 LU | Real contrast between breakdown and drop |
+| Integrated loudness | ≈ −10.6 LUFS | Club level, deliberately not pushed to the −9 the limiter could reach: at that point it was saturated and flattening the kick |
+| Loudness range | ≈ 5.0 LU | Real contrast between breakdown and drop |
 | True peak | ≈ −1.0 dBTP | Survives MP3 encoding without clipping |
 | Crest factor | ≈ 10 dB | Loud but not squashed flat |
 | Bass correlation | 1.00 | Low end is perfectly mono — no cancellation on a club sub |
