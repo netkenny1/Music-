@@ -813,7 +813,10 @@ def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
 
     if verbose:
         print("[5/5] mastering")
-    master = master_chain(mix, sr, target_lufs=-9.3, ceiling_db=-1.0,
+    # -10.5 rather than -9.3: at -9.3 the limiter was loudness-saturated,
+    # flattening the kick's transient to buy level the waveform could not
+    # give. DJs gain-match in the booth; punch is what they cannot add back.
+    master = master_chain(mix, sr, target_lufs=-10.5, ceiling_db=-1.0,
                           verbose=verbose)
 
     if verbose:
