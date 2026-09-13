@@ -668,7 +668,7 @@ def build_mixer(n, sr, fcurve):
 
     # Opposite side from the hook (-0.16), higher and drier, so the two
     # lines read as a conversation rather than a doubling.
-    mx.channel("counter", gain_db=-14.8, pan=0.26, width=1.1, duck=0.35,
+    mx.channel("counter", gain_db=-13.3, pan=0.26, width=1.1, duck=0.35,
                hp=520.0, eq=[F.peaking(2600.0, 1.5, 0.9, sr)],
                excite=dict(band=(1200.0, 4000.0), keep_above=3200.0,
                            drive=4.4, mix=1.10, mode="tube"),
