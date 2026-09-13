@@ -62,7 +62,7 @@ oscillators ─▶ filters ─▶ envelopes ─▶ instrument voices
 | `instruments.py` | 21 synthesised voices: drums, bass, chords, pads, ear candy |
 | `composition.py` | Tempo, key, chord progression, rhythm patterns, song structure |
 | `groove.py` | Syncopation scoring, micro-timing, polyrhythm and stutter schedules |
-| `mixer.py` | Channel strips, effect sends, master chain |
+| `mixer.py` | Channel strips, effect sends, master chain, per-channel stem capture |
 | `render.py` | Sequencer and entry point |
 | `analysis.py` | LUFS / true-peak / correlation metering (ITU-R BS.1770-4) |
 
@@ -202,6 +202,76 @@ error* rather than stimulus intensity. Predictive-coding accounts of groove
 next onset, a violation produces an error signal, and resolution back onto the
 grid is the reward. A track with no violations generates no error and no reward.
 The engineering job is to place the errors where they will be resolved.
+
+## Measuring the mix, then fixing it at source
+
+The first master measured fine on a loudness meter and still sounded dark and
+boxy. A third-octave sweep of the main drop against a pink reference said why:
+a **7-15 dB scoop from 160 Hz to 8 kHz**, worst in the 3-5 kHz presence band,
+with a resonant bump at 500-630 Hz sitting inside it. A meter cannot show that;
+only a spectrum can.
+
+Master EQ would have been lipstick, so the mixer gained `keep_stems=` and every
+channel was measured on its own. Three things fell out that no amount of
+listening had made obvious:
+
+* **The presence band contained no music.** Above 2.5 kHz the band leaders were
+  clap, shaker and hats -- noise. The pad produced nothing above 2.5 kHz and the
+  stab nothing above 4 kHz, because their filters closed to under a third of the
+  cutoff for most of every note. The master was already boosting +3.2 dB at 4 kHz
+  and +4 dB at 8.5 kHz and the result was *still* 15 dB under pink: it was
+  amplifying hiss to chase harmonics the source never had.
+* **Four melodic voices peaked in the same band.** arp, melody, rim and vox all
+  had their energy maximum at 400-630 Hz. That is the bump, and it is mutual
+  masking.
+* **The 250 Hz master cut was deepening a hole.** It was there to "clear mud";
+  the low-mids were already 7 dB below pink.
+
+**The exciter.** Opening a lowpass only reveals harmonics an oscillator already
+produced. To *create* presence, `dynamics.exciter()` band-passes the region that
+still has energy (roughly 0.8-3 kHz), saturates it so a 1.2 kHz partial breeds
+new ones at 2.4 and 3.6 kHz, high-passes the result so only the new harmonics
+survive, and blends. Two details decide whether it works at all:
+
+1. The band is normalised into the waveshaper. `tanh(0.02)` is 0.02 to four
+   places -- an isolated 1-3 kHz slice of a mix is always quiet, so without
+   normalisation the shaper is linear and generates nothing whatever the drive.
+2. It is tuned from a *real* note, not a synthetic one. The first pass measured
+   +13 dB on a lowpassed test saw and then +1.6 dB on an actual stab, because
+   the real stab already had content at -50 dB up there and the test source had
+   none. Drive 4.8 / mix 1.4 gives +9.8 dB on the real note with the peak level
+   moving 0.4 dB.
+
+**Slotting.** Each melodic voice was given its own band: rim and arp high-passed
+up out of the pile, the melody given a 1.4 kHz peak, the vox boost moved from
+3 kHz (where it had nothing to lift) to 1.8 kHz. The stab's sustain floor went
+from 0.30 to 0.52 of cutoff so the chord keeps its body instead of closing to a
+mumble after the transient.
+
+**Measured on the main drop, relative to pink, anchored on the kick
+fundamental:**
+
+| band | before | after | change |
+|---|---|---|---|
+| sub 20-63 | +1.1 | +1.1 | 0.0 |
+| bass 63-160 | +5.1 | +5.3 | +0.1 |
+| low-mid 160-400 | -2.8 | -0.6 | **+2.2** |
+| mid 400-1000 | -2.6 | -2.3 | +0.3 |
+| upper-mid 1-3.15k | -6.7 | -5.3 | **+1.5** |
+| presence 3.15-8k | -9.8 | -6.5 | **+3.3** |
+| 500-630 Hz bump | +4.4 | +2.9 | **-1.5** |
+
+The low end did not move, which is the point: everything was fixed above it,
+at source, and the limiter is doing slightly less work than before (glue comp
+-1.5 dB, loudness range up from 4.36 to 4.54 LU).
+
+**Two musical additions** that happen to fill the same holes: the pad now
+doubles its top voice an octave up, quietly, so 1-3 kHz carries something
+harmonic rather than only hats; and a counter-melody (`composition.COUNTER`)
+answers the hook in the second half of the main drop -- every note a chord
+tone, a fifth or more above the hook so the lines never cross, ending Bb-G-F
+onto the root of the next cycle. It is deliberately subtle: +0.7 dB in its
+band, and the stereo image shifts 0.8 dB right when it enters.
 
 ## Arrangement
 
