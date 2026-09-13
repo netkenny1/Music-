@@ -23,6 +23,21 @@ Renders the full track and prints a mastering report. Output is deterministic â€
 every random process is seeded, so the same code always produces the identical
 waveform.
 
+```bash
+python3 engine/render.py --bars 64-88      # just the main drop, for iterating
+python3 engine/render.py --serial          # single-process mixing, for timing
+```
+
+A `--bars` window goes through the same sequencer, mixer and master chain as
+the full track and is written with a `_bars64-88` suffix so it never overwrites
+the master. Two honest caveats: loudness targeting only sees the window, so the
+limiter drive can differ by a fraction of a dB, and anything that started
+sustaining more than two bars before the window is not there.
+
+Mixing runs the sixteen channel strips, then the four reverb buses, across
+every core by default. The strips are independent until the sum, so the
+parallel path is designed to give the identical result to the serial one.
+
 ## How it is built
 
 Signal flow, top to bottom:
