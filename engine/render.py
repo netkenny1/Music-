@@ -187,6 +187,22 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                 ("kick", "clap", "hat", "ohat", "shaker", "rim", "snare",
                  "crash", "tom", "tamb", "conga")}
 
+    # Note pools. The texture layer alone is ~1,700 plucks per track and a
+    # profile put it at a third of all synthesis time -- yet a pluck depends
+    # only on its pitch, the section's cutoff and a seed. Rendering three
+    # variants per (pitch, cutoff) and rotating through them, the way the
+    # drum cache already does, costs a few dozen syntheses instead of a few
+    # thousand and keeps the round-robin variation that stops it sounding
+    # stapled on. Pads and stabs get the same treatment.
+    pools = {}
+    def pooled(kind, key, make, variants=3):
+        slot = pools.setdefault((kind, key), [])
+        if len(slot) < variants:
+            slot.append(make(len(slot)))
+            return slot[-1]
+        counters[kind] = counters.get(kind, 0) + 1
+        return slot[counters[kind] % variants]
+
     def nxt(k):
         counters[k] += 1
         return counters[k]
@@ -433,29 +449,36 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # the cutoff climbs across every 8-bar phrase and resets,
                     # so the chords open up towards each phrase end
                     sweep = 0.78 + 0.44 * ((lb % 8) / 7.0)
-                    st = I.stab([midi_to_hz(m) for m in chord.voicing],
-                                clock.dur(3) / sr + 0.18, sr,
-                                cutoff=(2900.0 + 3100.0 * sec.energy) * sweep,
-                                decay=0.20, detune=11.0,
-                                seed=97 + bar * 5 + step)
+                    scut = round((2900.0 + 3100.0 * sec.energy) * sweep / 25.0) * 25.0
+                    st = pooled("stab", (tuple(chord.voicing), scut),
+                                lambda v: I.stab([midi_to_hz(m) for m in chord.voicing],
+                                                 clock.dur(3) / sr + 0.18, sr,
+                                                 cutoff=scut, decay=0.20,
+                                                 detune=11.0, seed=97 + v * 13))
                     mx.channels["stab"].add(st * vel * 0.9, pos)
 
             # ---------------- pad (one long note per chord) ----------------
             if part_state(sec, "pad", lb) and bar % C.CHORD_BARS == 0:
                 dur = C.CHORD_BARS * clock.bar + 1.1
-                p = I.pad([midi_to_hz(m) for m in chord.voicing], dur, sr,
-                          cutoff=1250.0 + 2050.0 * sec.energy,
-                          attack=0.8, release=1.3, seed=101 + bar)
+                cut = 1250.0 + 2050.0 * sec.energy
+                p = pooled("pad", (tuple(chord.voicing), round(cut)),
+                           lambda v: I.pad([midi_to_hz(m) for m in chord.voicing],
+                                           dur, sr, cutoff=cut, attack=0.8,
+                                           release=1.3, seed=101 + v * 11),
+                           variants=2)
                 mx.channels["pad"].add(p, clock.at(bar) - int(0.05 * sr))
                 # Air voice: the top note doubled an octave up, quiet. The
                 # close voicings all sit inside one octave around middle C,
                 # which is warm but leaves 1-3 kHz with no *musical* content.
                 # One high voice fills that band with something harmonic
                 # instead of leaving it to the hats.
-                top = I.pad([midi_to_hz(chord.voicing[-1] + 12)], dur, sr,
-                            cutoff=2200.0 + 2600.0 * sec.energy, voices=5,
-                            detune=12.0, attack=1.1, release=1.5,
-                            seed=103 + bar)
+                tcut = 2200.0 + 2600.0 * sec.energy
+                top = pooled("padair", (chord.voicing[-1], round(tcut)),
+                             lambda v: I.pad([midi_to_hz(chord.voicing[-1] + 12)],
+                                             dur, sr, cutoff=tcut, voices=5,
+                                             detune=12.0, attack=1.1,
+                                             release=1.5, seed=103 + v * 11),
+                             variants=2)
                 mx.channels["pad"].add(top * (0.30 + 0.20 * sec.energy),
                                        clock.at(bar) - int(0.05 * sr))
 
@@ -521,9 +544,12 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         continue
                     note = chord.arp[order[(step + lb * 3) % len(order)]]
                     accent = 1.0 if step % 4 == 0 else (0.72 if step % 2 == 0 else 0.55)
-                    tone = I.pluck(midi_to_hz(note), clock.dur(2) / sr + 0.12, sr,
-                                   decay=0.16, cutoff=1400.0 + 2200.0 * sec.energy,
-                                   seed=191 + bar * 5 + step)
+                    cut = 1400.0 + 2200.0 * sec.energy
+                    tone = pooled("texture", (note, round(cut)),
+                                  lambda v: I.pluck(midi_to_hz(note),
+                                                    clock.dur(2) / sr + 0.12, sr,
+                                                    decay=0.16, cutoff=cut,
+                                                    seed=191 + v * 17))
                     pan = 0.45 * np.sin(2 * np.pi * (bar * 16 + step) / 96.0)
                     mx.channels["texture"].add(
                         tone * vel * accent * (0.5 + 0.5 * sec.energy),
