@@ -262,7 +262,7 @@ def stab(freqs, dur, sr=SR, cutoff=3000.0, res=1.35, decay=0.22,
     # spent its sustain below 1.5 kHz and vanished from the mix the moment
     # the transient passed. 0.45 keeps the body present without losing the
     # snap that makes it a stab rather than a pad.
-    fenv = cutoff * (0.45 + 0.95 * perc_env(n, sr, 0.003, 0.055, 4.5))
+    fenv = cutoff * (0.52 + 0.90 * perc_env(n, sr, 0.003, 0.055, 4.5))
     fenv = np.clip(fenv, 120.0, 0.45 * sr)
     left = F.sweep_lowpass(left, fenv, res, sr, poles=4)
     right = F.sweep_lowpass(right, fenv, res, sr, poles=4)

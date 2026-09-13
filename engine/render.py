@@ -592,7 +592,7 @@ def build_mixer(n, sr, fcurve):
                    F.peaking(280.0, -2.0, 1.0, sr),
                    F.peaking(1200.0, 1.4, 0.9, sr)],
                excite=dict(band=(700.0, 2600.0), keep_above=2200.0,
-                           drive=2.6, mix=0.22, mode="tube"),
+                           drive=3.4, mix=0.55, mode="tube"),
                comp=dict(threshold=-20.0, ratio=3.5, attack=0.006,
                          release=0.085, knee=5.0, makeup=3.0),
                filter_curve=fcurve)
@@ -619,7 +619,7 @@ def build_mixer(n, sr, fcurve):
     mx.channel("stab", gain_db=-10.2, width=1.30, duck=0.62, hp=170.0,
                eq=[F.peaking(430.0, -1.7, 1.0, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
-                           drive=3.0, mix=0.40, mode="tube"),
+                           drive=4.8, mix=1.40, mode="tube"),
                comp=dict(threshold=-22.0, ratio=2.5, attack=0.008,
                          release=0.130, makeup=2.5),
                sends={"plate": 0.30, "delay": 0.18, "room": 0.08},
@@ -629,35 +629,35 @@ def build_mixer(n, sr, fcurve):
                eq=[F.peaking(330.0, -2.2, 0.9, sr),
                    F.highshelf(9000.0, 1.5, 0.7, sr)],
                excite=dict(band=(700.0, 2400.0), keep_above=2500.0,
-                           drive=2.6, mix=0.28, mode="tube"),
+                           drive=4.4, mix=1.20, mode="tube"),
                sends={"hall": 0.55, "plate": 0.15},
                filter_curve=fcurve)
 
     mx.channel("keys", gain_db=-14.6, width=1.20, duck=0.35, hp=200.0,
                eq=[F.peaking(400.0, -1.0, 1.0, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
-                           drive=2.8, mix=0.30, mode="tube"),
+                           drive=4.4, mix=1.20, mode="tube"),
                sends={"plate": 0.34, "delay": 0.18, "hall": 0.12},
                filter_curve=fcurve)
 
     mx.channel("arp", gain_db=-15.2, width=1.25, duck=0.42, hp=680.0,
                eq=[F.highshelf(8000.0, 1.5, 0.7, sr)],
                excite=dict(band=(1000.0, 3800.0), keep_above=3000.0,
-                           drive=3.2, mix=0.38, mode="tanh"),
+                           drive=4.6, mix=1.10, mode="tanh"),
                sends={"delay": 0.48, "plate": 0.22},
                filter_curve=fcurve)
 
     mx.channel("vox", gain_db=-16.6, width=1.18, duck=0.45, hp=220.0,
                eq=[F.peaking(1800.0, 2.2, 1.0, sr)],
                excite=dict(band=(900.0, 3200.0), keep_above=2700.0,
-                           drive=2.8, mix=0.34, mode="tube"),
+                           drive=4.4, mix=1.20, mode="tube"),
                sends={"hall": 0.40, "delay": 0.22, "plate": 0.18},
                filter_curve=fcurve)
 
     mx.channel("melody", gain_db=-15.2, pan=-0.16, width=1.1, duck=0.35,
                hp=330.0, eq=[F.peaking(1400.0, 1.8, 0.9, sr)],
                excite=dict(band=(900.0, 3200.0), keep_above=2700.0,
-                           drive=2.8, mix=0.32, mode="tube"),
+                           drive=4.4, mix=1.20, mode="tube"),
                sends={"plate": 0.32, "delay": 0.30},
                filter_curve=fcurve)
 
@@ -666,7 +666,7 @@ def build_mixer(n, sr, fcurve):
     mx.channel("counter", gain_db=-16.8, pan=0.26, width=1.1, duck=0.35,
                hp=520.0, eq=[F.peaking(2600.0, 1.5, 0.9, sr)],
                excite=dict(band=(1200.0, 4000.0), keep_above=3200.0,
-                           drive=2.8, mix=0.30, mode="tube"),
+                           drive=4.4, mix=1.10, mode="tube"),
                sends={"plate": 0.26, "delay": 0.34},
                filter_curve=fcurve)
 

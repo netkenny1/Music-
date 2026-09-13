@@ -248,8 +248,8 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         # noise percussion living up there, that was amplifying hiss to chase a
         # presence the source never had. The channel exciters now generate real
         # harmonics instead, so the master only has to tilt, not rescue.
-        F.peaking(4000.0, 1.6, 0.7, sr),
-        F.highshelf(9000.0, 2.4, 0.7, sr),     # air
+        F.peaking(4000.0, 2.4, 0.7, sr),
+        F.highshelf(9000.0, 3.2, 0.7, sr),     # air
     )
 
     before = float(np.max(np.abs(y)))
