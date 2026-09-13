@@ -503,3 +503,68 @@ def stutter(src, sr=SR, step_seconds=0.12, schedule=None, pitch_rise=0.0,
         pos += n
 
     return out
+
+
+# ==========================================================================
+# Percussion and layers added for fullness and bounce
+# ==========================================================================
+
+def tambourine(sr=SR, dur=0.16, seed=173, bright=1.0):
+    """
+    Tambourine: a cluster of jingles, not one hit.
+
+    Six or seven zils landing 2-4 ms apart, each a narrow burst of bright
+    noise, plus a fast tremolo on the tail as the jingles keep rattling. It
+    lives above 5 kHz, so it fills the top without touching the hats' slot at
+    7-12 kHz -- the two read as different instruments rather than one hat.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    out = np.zeros(n)
+    t0 = 0.0
+    for k in range(7):
+        i = int(t0 * sr)
+        ln = n - i
+        if ln <= 0:
+            break
+        burst = noise(ln, seed=seed + k) * perc_env(ln, sr, 0.0003, 0.012, 6.0)
+        out[i:] += burst * rng.uniform(0.6, 1.0)
+        t0 += rng.uniform(0.002, 0.004)
+    t = np.arange(n) / sr
+    tail = noise(n, seed=seed + 40) * perc_env(n, sr, 0.004, dur * 0.5, 2.6)
+    tail *= 0.5 + 0.5 * np.sin(2 * np.pi * 38.0 * t)          # rattle
+    out += tail * 0.55
+    out = F.bandlimit(out, 5200.0 * bright, 14500.0, sr)
+    out /= max(float(np.max(np.abs(out))), 1e-9) / 0.9
+    return fade(out, sr, 0.0003, 0.01)
+
+
+def conga(sr=SR, high=True, seed=179):
+    """
+    Conga / bongo-style hand drum: a pitched membrane with a fast pitch drop
+    and a slap transient. Two tunings so a pattern can talk (high answers
+    low). Sits at 180-400 Hz, under the stabs and above the bass, which is a
+    slot nothing else in this track occupies.
+    """
+    f0, f1, dur = (410.0, 235.0, 0.26) if high else (290.0, 165.0, 0.34)
+    n = int(dur * sr)
+    t = np.arange(n) / sr
+    f = f1 + (f0 - f1) * np.exp(-t / 0.018)
+    body = sine(f, n, sr) * perc_env(n, sr, 0.0006, dur * 0.55, 3.8)
+    slap = F.bandlimit(noise(n, seed=seed), 900.0, 4500.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.009, 8.0)
+    out = body * 0.85 + slap * 0.35
+    out = D.saturate(out, 1.6, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(120.0, 0.707, sr))
+    return fade(out, sr, 0.0003, 0.012)
+
+
+def sub_note(freq, dur, sr=SR):
+    """
+    Pure sine sub under the bass. The bass voice is filtered saw plus sine;
+    on a big system a clean sine an octave below its harmonics is what the
+    chest feels. Soft edges so it never clicks against the kick.
+    """
+    n = int(dur * sr)
+    x = sine(freq, n, sr) * adsr(n, sr, a=0.012, d=0.05, s=0.9, r=0.06, curve=1.5)
+    return fade(x, sr, 0.004, 0.02)

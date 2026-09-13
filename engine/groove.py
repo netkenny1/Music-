@@ -121,6 +121,10 @@ MICRO_TIMING = {
     "vox":   +8.0,
     "melody": +5.0,
     "counter": +7.0,   # answers the hook, so it sits a touch further back
+    "texture": +2.0,   # background notes ride close to the grid
+    "tamb":    +8.0,   # jingles sit back with the clap
+    "conga":   +3.0,
+    "bells":   +4.0,
 }
 
 

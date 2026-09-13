@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 
 BPM = 124.0
 KEY_NAME = "F minor"
-SWING = 0.13          # fraction of a 16th that odd steps are pushed late
+SWING = 0.19          # fraction of a 16th that odd steps are pushed late
 STEPS_PER_BAR = 16
 
 
@@ -163,7 +163,36 @@ P = {
     "clap_push":   "...x.......x....",
     "arp":         "x.x.x.x.x.x.x.x.",
     "arp_dense":   "xxxxxxxxxxxxxxxx",
+
+    # --- bounce and variation ---------------------------------------------
+    # Hat variants rotate every two bars so the top never sits still. The
+    # bounce pattern accents the swung off-16ths; the roll bar leads into
+    # the next phrase.
+    "hat_bounce":  "o.XooX.oo.XooX.o",
+    "hat_roll":    "oXoXoXoXoXoXoXXX",
+    # Bass leaning on the off-8ths with the pickups doubled: the "and" of
+    # every beat is what makes house bounce rather than march.
+    "bass_bounce": "..x.x.x..xx.x.x.",
+    "bass_oct":    "..x..xx...x..xx.",
+    # Tambourine on the off-8ths under the open hat, 16ths for lift bars.
+    "tamb":        "..x...x...x...x.",
+    "tamb_16":     ".o.x.o.x.o.x.o.x",
+    # Two-bar conga conversation: low pattern, then high answers.
+    "conga_a":     "x..x..x...x.x...",
+    "conga_b":     "..x.x..x..x...x.",
+    # Continuous background notes.
+    "texture":     "xxxxxxxxxxxxxxxx",
 }
+
+# Background-note orders, indexed by 8-bar cycle. Each is a permutation of
+# the chord's four arp tones; rotating them is what stops a 16th-note texture
+# from becoming wallpaper.
+TEXTURE_ORDERS = [
+    [0, 1, 2, 3, 2, 1, 0, 1],          # up and back
+    [3, 2, 1, 0, 1, 2, 3, 2],          # down and back
+    [0, 2, 1, 3, 0, 2, 1, 3],          # skipping
+    [0, 3, 1, 2, 3, 0, 2, 1],          # scattered
+]
 
 
 # --------------------------------------------------------------------------
@@ -209,18 +238,25 @@ def build_sections():
     # --- 16 bars: DJ intro. Drums only, filtered, gradually opening. -------
     add("intro", 16, 0.30,
         kick=True, hat="hat_sparse", shaker=True, rim=True,
+        texture=True, texture_from=4, conga=True, conga_from=8,
         filter_sweep=(600, 9000), crash_at=[0])
 
     # --- 8 bars: first build. Bass and full hats arrive. -------------------
     add("build1", 8, 0.55,
         kick=True, hat="hat", ohat=True, shaker=True, clap="clap",
-        bass="bass_simple", riser=True, filter_sweep=(4000, 18000))
+        bass="bass_simple", riser=True, filter_sweep=(4000, 18000),
+        texture=True, tamb="tamb", conga=True)
 
     # --- 16 bars: drop one. Everything but the ear candy. ------------------
     add("drop1", 16, 0.90,
         kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
         bass="bass", stab="stab", pad=True, rim=True, crash_at=[0, 8],
-        sub_drop=True,
+        sub_drop=True, sub_layer=True,
+        hat_cycle=["hat", "hat_bounce", "hat", "hat_roll"], hat_cycle_bars=2,
+        bass_cycle=["bass", "bass_bounce"], bass_cycle_bars=8,
+        tamb="tamb", conga=True, texture=True,
+        # subtle drop: the top pulled for one bar, then everything back
+        mini_drop_bars=[8],
         # first violations, used sparingly: the groove is still being taught
         kick_pattern_bars={7: "kick_hole3"},
         clap_push_bars=[11],
@@ -229,8 +265,11 @@ def build_sections():
     # --- 16 bars: breakdown. Kick drops out for 8 bars, harmony takes over.
     add("break", 16, 0.45,
         kick_from=8, hat_from=12, hat="hat_sparse",
-        pad=True, keys=True, vox=True, melody=True,
+        pad=True, keys=True, vox=True, melody=True, texture=True,
         clap_from=12, clap="clap", downlifter=True,
+        conga=True, conga_from=8, tamb="tamb", tamb_from=8,
+        # half-drop: the kick's return at bar 8 lands with a small impact
+        impact_bars=[8],
         reverse_crash_at=[15], filter_sweep=(1200, 14000))
 
     # --- 8 bars: second build. Snare roll, riser, everything tightening. ---
@@ -238,6 +277,7 @@ def build_sections():
         kick=True, hat="hat", shaker=True, bass="bass_simple",
         pad=True, stab="stab", snare_roll=True, riser=True,
         clap="clap", filter_sweep=(2500, 18000),
+        texture=True, tamb="tamb_16", conga=True,
         stutter_at=[(7, 8, "stab")],
         # total silence on the last beat. The riser stops, everything stops,
         # and the listener is left holding a prediction with nothing to meet it.
@@ -249,7 +289,13 @@ def build_sections():
         bass="bass_busy", stab="stab_synco", pad=True, rim=True, keys=True,
         arp=True, vox=True, melody=True, crash_at=[8, 16],
         counter=True, counter_from=12,
-        sub_drop=True, fill_bars=[7, 15, 23],
+        sub_drop=True, sub_layer=True, fill_bars=[7, 15, 23],
+        hat_cycle=["hat", "hat_bounce", "hat_roll", "hat_bounce"], hat_cycle_bars=2,
+        bass_cycle=["bass_busy", "bass_bounce", "bass_oct"], bass_cycle_bars=8,
+        tamb="tamb", conga=True, texture=True, bells=True,
+        # subtle drops at 4 and 20, a loud one at 12 -- so the 24 bars
+        # never run more than 8 without something giving way or landing
+        mini_drop_bars=[4, 20], impact_bars=[12],
         # THE DELAYED DROP. Bar 0 of the drop is a hole: no kick, no groove,
         # just a sub and the tail of the build hanging in the air. The kick
         # then arrives EARLY, on the last 8th of the bar, so the beat both
@@ -266,7 +312,8 @@ def build_sections():
     add("outro", 16, 0.35,
         kick=True, kick_until=14, hat="hat", shaker=True,
         bass="bass_simple", bass_until=8, stab="stab", stab_until=4,
-        clap="clap", clap_until=8, filter_sweep=(16000, 900))
+        clap="clap", clap_until=8, filter_sweep=(16000, 900),
+        texture=True, texture_until=8, tamb="tamb", tamb_until=8)
 
     return S
 

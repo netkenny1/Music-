@@ -54,6 +54,10 @@ class DrumCache:
                              seed=45 + i * 9, open_hat=True) for i in range(3)]
         self.shaker = [I.shaker(sr, 0.085 + i * 0.006, seed=57 + i * 11)
                        for i in range(4)]
+        self.tamb = [I.tambourine(sr, 0.15 + i * 0.01, seed=173 + i * 9,
+                                  bright=1.0 + i * 0.03) for i in range(3)]
+        self.conga_hi = [I.conga(sr, high=True, seed=179 + i * 5) for i in range(3)]
+        self.conga_lo = [I.conga(sr, high=False, seed=185 + i * 5) for i in range(3)]
         self.rim = [I.rim(sr, seed=61 + i * 6, tune=420 + i * 12)
                     for i in range(3)]
         self.crash = [I.crash(sr, 2.7, seed=71 + i * 8) for i in range(2)]
@@ -181,7 +185,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
 
     counters = {k: 0 for k in
                 ("kick", "clap", "hat", "ohat", "shaker", "rim", "snare",
-                 "crash", "tom")}
+                 "crash", "tom", "tamb", "conga")}
 
     def nxt(k):
         counters[k] += 1
@@ -209,6 +213,33 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                 return step >= sil_step
 
             kick_pat = sec.parts.get("kick_pattern_bars", {}).get(lb)
+
+            def cycled(key, base):
+                """Pattern for this bar from `<key>_cycle`, rotating every
+                `<key>_cycle_bars` bars, so the same part never plays the
+                same way for long."""
+                cyc = sec.parts.get(f"{key}_cycle")
+                if not cyc:
+                    return base
+                per = sec.parts.get(f"{key}_cycle_bars", 4)
+                return cyc[(lb // per) % len(cyc)]
+
+            # A subtle drop: the top of the kit and the chords vanish for one
+            # bar while kick, bass and the background notes carry on. The
+            # bar after feels like a drop because something came back.
+            is_mini = lb in sec.parts.get("mini_drop_bars", [])
+            # A loud drop mid-section: crash + sub impact on the downbeat,
+            # with a fill in the bar before so it is announced.
+            is_impact = lb in sec.parts.get("impact_bars", [])
+            before_impact = (lb + 1) in sec.parts.get("impact_bars", [])
+            if is_impact:
+                mx.channels["fx"].add(
+                    cache.pick(cache.crash, nxt("crash")) * 0.6, clock.at(bar))
+                mx.channels["sub"].add(I.sub_drop(1.4, sr, f0=100.0) * 0.7,
+                                       clock.at(bar))
+            if is_mini:
+                rc = I.reverse_crash(1.2, sr)
+                mx.channels["fx"].add(rc * 0.4, clock.at(bar + 1) - len(rc))
             push_clap = lb in sec.parts.get("clap_push_bars", [])
             ante_bass = lb in sec.parts.get("bass_ante_bars", [])
             late_stab = lb in sec.parts.get("stab_late_bars", [])
@@ -235,7 +266,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
 
             # ---------------- kick ----------------------------------------
             if not is_hole and part_state(sec, "kick", lb) is not None:
-                pat = kick_pat or ("kick_fill" if is_fill else "kick")
+                pat = kick_pat or ("kick_fill" if (is_fill or before_impact) else "kick")
                 for step, vel in pattern_hits(pat):
                     if muted(step):
                         continue
@@ -266,8 +297,8 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
 
             # ---------------- hats ----------------------------------------
             hp = part_state(sec, "hat", lb)
-            if hp:
-                name = hp if isinstance(hp, str) else "hat"
+            if hp and not is_mini:
+                name = cycled("hat", hp if isinstance(hp, str) else "hat")
                 for step, vel in pattern_hits(name):
                     if muted(step):
                         continue
@@ -278,7 +309,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         cache.pick(cache.hat, nxt("hat")) * g,
                         place("hat", bar, step, jitter=1.5))
 
-            if part_state(sec, "ohat", lb) and not is_hole:
+            if part_state(sec, "ohat", lb) and not is_hole and not is_mini:
                 for step, vel in pattern_hits("ohat"):
                     if muted(step):
                         continue
@@ -286,7 +317,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         cache.pick(cache.ohat, nxt("ohat")) * vel *
                         rng.uniform(0.9, 1.05), place("ohat", bar, step, jitter=1.4))
 
-            if part_state(sec, "shaker", lb) and not is_hole:
+            if part_state(sec, "shaker", lb) and not is_hole and not is_mini:
                 for step, vel in pattern_hits("shaker"):
                     if muted(step):
                         continue
@@ -294,6 +325,29 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         cache.pick(cache.shaker, nxt("shaker")) * vel *
                         rng.uniform(0.82, 1.08),
                         place("shaker", bar, step, jitter=2.0))
+
+            tp = part_state(sec, "tamb", lb)
+            if tp and not is_hole and not is_mini:
+                for step, vel in pattern_hits(tp if isinstance(tp, str) else "tamb"):
+                    if muted(step):
+                        continue
+                    mx.channels["tamb"].add(
+                        cache.pick(cache.tamb, nxt("tamb")) * vel *
+                        rng.uniform(0.85, 1.05) * (0.6 + 0.4 * sec.energy),
+                        place("tamb", bar, step, jitter=2.0))
+
+            if part_state(sec, "conga", lb) and not is_hole:
+                # two-bar call and answer: low pattern, then high pattern
+                low = (lb % 2 == 0)
+                for step, vel in pattern_hits("conga_a" if low else "conga_b"):
+                    if muted(step):
+                        continue
+                    src = cache.conga_lo if low else cache.conga_hi
+                    mx.channels["conga"].add(
+                        cache.pick(src, nxt("conga")) * vel *
+                        rng.uniform(0.8, 1.0) * (0.55 + 0.45 * sec.energy),
+                        place("conga", bar, step, jitter=2.4),
+                        pan=-0.3 if low else 0.3)
 
             if part_state(sec, "rim", lb) and lb % 2 == 1 and not is_hole:
                 for step, vel in pattern_hits("rim"):
@@ -323,14 +377,18 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
             if bp and not is_hole:
                 # The anticipated bass lands a 16th BEFORE the beat and holds
                 # through it, so the downbeat is felt but never struck.
-                name = "bass_ante" if ante_bass else (bp if isinstance(bp, str) else "bass")
+                base = bp if isinstance(bp, str) else "bass"
+                name = "bass_ante" if ante_bass else cycled("bass", base)
                 hits = list(pattern_hits(name))
                 for k, (step, vel) in enumerate(hits):
                     # a note lasts until the next one, so the line is legato
                     nxt_step = hits[k + 1][0] if k + 1 < len(hits) else 16
                     steps = min(nxt_step - step, 4)
-                    # octave lift on the pickup into the next bar
-                    note = chord.bass + (12 if step >= 15 else 0)
+                    # octave lift on the pickup into the next bar; on the
+                    # bounce and octave patterns every second hit jumps too,
+                    # which is the classic house "bouncing" bassline
+                    lift = step >= 15 or (name in ("bass_bounce", "bass_oct") and k % 2 == 1)
+                    note = chord.bass + (12 if lift else 0)
                     dur = clock.dur(steps) / sr + 0.06
                     if muted(step):
                         continue
@@ -341,6 +399,12 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                                seed=83 + bar * 3 + step)
                     mx.channels["bass"].add(
                         b * vel, place("bass", bar, step, swung=False, jitter=0))
+                    # sine sub under the root notes only (never the octave
+                    # lifts): the chest-level weight a filtered saw cannot give
+                    if sec.parts.get("sub_layer") and not lift:
+                        mx.channels["sub"].add(
+                            I.sub_note(midi_to_hz(chord.bass), dur, sr) * vel * 0.55,
+                            place("sub", bar, step, swung=False, jitter=0))
 
             # ---------------- chord stabs ---------------------------------
             sp = part_state(sec, "stab", lb)
@@ -350,9 +414,14 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     if muted(step):
                         continue
                     pos = place("stab", bar, step, jitter=0)
+                    if is_mini:
+                        continue
+                    # the cutoff climbs across every 8-bar phrase and resets,
+                    # so the chords open up towards each phrase end
+                    sweep = 0.78 + 0.44 * ((lb % 8) / 7.0)
                     st = I.stab([midi_to_hz(m) for m in chord.voicing],
                                 clock.dur(3) / sr + 0.18, sr,
-                                cutoff=2900.0 + 3100.0 * sec.energy,
+                                cutoff=(2900.0 + 3100.0 * sec.energy) * sweep,
                                 decay=0.20, detune=11.0,
                                 seed=97 + bar * 5 + step)
                     mx.channels["stab"].add(st * vel * 0.9, pos)
@@ -408,6 +477,38 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                 v = I.vox_chop(midi_to_hz(note), clock.dur(10) / sr, sr,
                                vowel=vowel, seed=137 + bar, decay=0.45)
                 mx.channels["vox"].add(v * 0.9, place("vox", bar, 2, jitter=0))
+
+            # ---------------- background notes ----------------------------
+            # A soft 16th-note texture under nearly everything. The note
+            # order rotates each 8-bar cycle (TEXTURE_ORDERS) and the pan
+            # walks slowly across the field, so it moves without ever
+            # asking for attention.
+            if part_state(sec, "texture", lb) and not is_hole:
+                order = C.TEXTURE_ORDERS[(bar // 8) % len(C.TEXTURE_ORDERS)]
+                for step, vel in pattern_hits("texture"):
+                    if muted(step):
+                        continue
+                    note = chord.arp[order[(step + lb * 3) % len(order)]]
+                    accent = 1.0 if step % 4 == 0 else (0.72 if step % 2 == 0 else 0.55)
+                    tone = I.pluck(midi_to_hz(note), clock.dur(2) / sr + 0.12, sr,
+                                   decay=0.16, cutoff=1400.0 + 2200.0 * sec.energy,
+                                   seed=191 + bar * 5 + step)
+                    pan = 0.45 * np.sin(2 * np.pi * (bar * 16 + step) / 96.0)
+                    mx.channels["texture"].add(
+                        tone * vel * accent * (0.5 + 0.5 * sec.energy),
+                        place("texture", bar, step, jitter=0.8), pan=pan)
+
+            # ---------------- bells answering the stabs -------------------
+            if part_state(sec, "bells", lb) and lb % 4 == 3 and not is_mini:
+                for step in (3, 7, 11):
+                    if muted(step):
+                        continue
+                    note = chord.arp[(step // 4 + lb) % 4] + 12
+                    tone = I.bell(midi_to_hz(note), 0.5, sr, ratio=3.01,
+                                  index=2.0, decay=0.42, seed=197 + bar + step)
+                    mx.channels["bells"].add(
+                        tone * 0.7, place("bells", bar, step, jitter=1.2),
+                        pan=0.5 if step == 7 else -0.5)
 
             # ---------------- melodic hook --------------------------------
             if part_state(sec, "melody", lb):
@@ -675,6 +776,26 @@ def build_mixer(n, sr, fcurve):
                sends={"plate": 0.26, "delay": 0.34},
                filter_curve=fcurve)
 
+    mx.channel("tamb", gain_db=-21.0, pan=0.32, width=1.15, hp=3200.0,
+               sends={"room": 0.14}, filter_curve=fcurve)
+
+    mx.channel("conga", gain_db=-17.5, width=1.2, hp=140.0, duck=0.25,
+               eq=[F.peaking(300.0, 1.5, 1.0, sr), F.peaking(2400.0, 1.2, 1.0, sr)],
+               comp=dict(threshold=-22.0, ratio=2.2, attack=0.004,
+                         release=0.090, makeup=1.5),
+               sends={"room": 0.28, "delay": 0.08}, filter_curve=fcurve)
+
+    # Background notes: high-passed hard, ducked hard, wet. It is there to be
+    # felt as motion, not heard as a part.
+    mx.channel("texture", gain_db=-22.5, width=1.35, duck=0.55, hp=620.0,
+               eq=[F.peaking(2200.0, 1.2, 0.9, sr)],
+               excite=dict(band=(1000.0, 3600.0), keep_above=3000.0,
+                           drive=3.5, mix=0.8, mode="tube"),
+               sends={"delay": 0.42, "plate": 0.26}, filter_curve=fcurve)
+
+    mx.channel("bells", gain_db=-19.5, width=1.4, duck=0.35, hp=900.0,
+               sends={"plate": 0.40, "delay": 0.30}, filter_curve=fcurve)
+
     mx.channel("fx", gain_db=-14.5, width=1.40, hp=180.0,
                sends={"hall": 0.30, "plate": 0.18})
 
@@ -801,8 +922,8 @@ def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
 
     # The pump follows the actual kick events, so it stops automatically
     # wherever the kick drops out.
-    duck = D.duck_envelope(n, kicks, sr, depth=0.80, hold=0.010,
-                           release=0.235, curve=1.75)
+    duck = D.duck_envelope(n, kicks, sr, depth=0.84, hold=0.010,
+                           release=0.205, curve=1.75)
 
     if verbose:
         print(f"[4/5] mixing ({len(mx.channels)} channels, "
