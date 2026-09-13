@@ -156,6 +156,14 @@ def sweep_lowpass(x, fc_curve, q=1.0, sr=SR, block=48, poles=4):
         j = min(i + block, n)
         fc = float(fc_curve[i])
         seg = x[i:j]
+
+        # Fast path: most channels are silent for most of a track, and a
+        # settled filter fed silence outputs silence. Skipping those blocks
+        # cuts render time roughly in half without changing a sample.
+        if not seg.any() and all(np.all(np.abs(z) < 1e-9) for z in zis):
+            out[i:j] = 0.0
+            continue
+
         if stages == 2:
             b, a = lowpass(fc, 0.54, sr)
             seg, zis[0] = lfilter(b, a, seg, zi=zis[0])

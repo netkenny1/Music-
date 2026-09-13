@@ -96,6 +96,30 @@ def build_filter_curve(clock, n, sr=SR):
     return np.convolve(pad, win, mode="same")[w:w + n]
 
 
+# How loud each section sits relative to the drops, before mastering.
+# Without this the limiter flattens everything to the same level and the
+# track has no arc -- measured loudness range collapses to under 3 LU, which
+# is what "loud but boring" sounds like on a meter.
+SECTION_GAIN = {
+    "intro": 0.72, "build1": 0.85, "drop1": 1.00, "break": 0.66,
+    "build2": 0.88, "drop2": 1.00, "outro": 0.82,
+}
+
+
+def build_section_gain(clock, n, sr=SR):
+    """Per-section level envelope, cross-faded so the joins are inaudible."""
+    g = np.ones(n)
+    for sec in C.SECTIONS:
+        a = clock.at(sec.start)
+        b = min(clock.at(sec.end), n)
+        if b > a:
+            g[a:b] = SECTION_GAIN.get(sec.name, 1.0)
+    w = int(0.35 * sr)                      # ~1/5 bar cross-fade
+    win = np.hanning(w) / np.hanning(w).sum()
+    pad = np.concatenate([np.full(w, g[0]), g, np.full(w, g[-1])])
+    return np.convolve(pad, win, mode="same")[w:w + n]
+
+
 def part_state(sec, key, local_bar):
     """
     Whether `key` plays in this bar, and with what value.
@@ -237,14 +261,14 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                     pos = clock.at(bar, step, swung=True)
                     st = I.stab([midi_to_hz(m) for m in chord.voicing],
                                 clock.dur(3) / sr + 0.18, sr,
-                                cutoff=1700.0 + 1600.0 * sec.energy,
+                                cutoff=2600.0 + 2400.0 * sec.energy,
                                 decay=0.20, detune=11.0,
                                 seed=97 + bar * 5 + step)
                     mx.channels["stab"].add(st * vel * 0.9, pos)
 
             # ---------------- pad (one long note per chord) ----------------
             if part_state(sec, "pad", lb) and bar % C.CHORD_BARS == 0:
-                dur = clock.bar_seconds = C.CHORD_BARS * clock.bar + 1.1
+                dur = C.CHORD_BARS * clock.bar + 1.1
                 p = I.pad([midi_to_hz(m) for m in chord.voicing], dur, sr,
                           cutoff=900.0 + 1400.0 * sec.energy,
                           attack=0.8, release=1.3, seed=101 + bar)
@@ -370,18 +394,18 @@ def build_mixer(n, sr, fcurve):
     beat = 60.0 / C.BPM
     mx.bus("room", S.reverb_ir(sr, rt60=0.85, predelay=0.008, damping=0.55,
                                width=0.9, er_level=0.8, seed=7),
-           gain_db=-13.0, eq=[F.highpass(400.0, 0.707, sr),
+           gain_db=-8.0, eq=[F.highpass(400.0, 0.707, sr),
                               F.lowpass(9000.0, 0.707, sr)], width=1.1)
 
     mx.bus("plate", S.reverb_ir(sr, rt60=1.9, predelay=0.022, damping=0.45,
                                 width=1.15, er_level=0.35, seed=17),
-           gain_db=-15.0, eq=[F.highpass(320.0, 0.707, sr),
+           gain_db=-9.5, eq=[F.highpass(320.0, 0.707, sr),
                               F.lowpass(11000.0, 0.707, sr)],
            width=1.2, duck=0.35)
 
     mx.bus("hall", S.reverb_ir(sr, rt60=3.6, predelay=0.045, damping=0.62,
                                width=1.3, er_level=0.25, seed=27),
-           gain_db=-17.0, eq=[F.highpass(260.0, 0.707, sr),
+           gain_db=-11.0, eq=[F.highpass(260.0, 0.707, sr),
                               F.lowpass(8000.0, 0.707, sr)],
            width=1.35, duck=0.45)
 
@@ -389,80 +413,81 @@ def build_mixer(n, sr, fcurve):
     # of on top of them, so echoes add motion without thickening the groove.
     mx.bus("delay", S.delay_ir(sr, time=beat * 0.75, feedback=0.40,
                                repeats=12, ping_pong=True, damping=0.55),
-           gain_db=-16.0, eq=[F.highpass(380.0, 0.707, sr),
+           gain_db=-10.0, eq=[F.highpass(380.0, 0.707, sr),
                               F.lowpass(7000.0, 0.707, sr)],
            width=1.3, duck=0.4)
 
     # --- channels ---------------------------------------------------------
-    mx.channel("kick", gain_db=-5.5, pan=0.0,
+    mx.channel("kick", gain_db=-7.5, pan=0.0,
                comp=dict(threshold=-12.0, ratio=2.2, attack=0.012,
                          release=0.120, knee=4.0, makeup=1.0),
                sends={"room": 0.05})
 
-    mx.channel("sub", gain_db=-13.0, pan=0.0, mono_below=200.0,
+    mx.channel("sub", gain_db=-15.0, pan=0.0, mono_below=200.0,
                hp=26.0, lp=140.0)
 
-    mx.channel("bass", gain_db=-8.0, pan=0.0, duck=0.78, mono_below=140.0,
+    mx.channel("bass", gain_db=-9.5, pan=0.0, duck=0.78, mono_below=140.0,
                hp=28.0,
-               eq=[F.peaking(95.0, 1.6, 1.0, sr),
+               eq=[F.peaking(95.0, 0.8, 1.0, sr),
                    F.peaking(280.0, -3.0, 1.0, sr),
                    F.peaking(1200.0, 1.2, 0.9, sr)],
                comp=dict(threshold=-20.0, ratio=3.5, attack=0.006,
                          release=0.085, knee=5.0, makeup=3.0),
                filter_curve=fcurve)
 
-    mx.channel("clap", gain_db=-13.5, pan=0.0, width=1.25, hp=220.0,
+    mx.channel("clap", gain_db=-10.0, pan=0.0, width=1.25, hp=220.0,
                comp=dict(threshold=-20.0, ratio=2.5, attack=0.003,
                          release=0.100, makeup=2.0),
                sends={"room": 0.40, "plate": 0.16})
 
-    mx.channel("hat", gain_db=-19.0, pan=0.13, width=1.15, hp=420.0,
-               eq=[F.highshelf(10000.0, 2.0, 0.7, sr)],
+    mx.channel("hat", gain_db=-11.5, pan=0.13, width=1.15, hp=420.0,
+               eq=[F.peaking(7000.0, 2.0, 0.9, sr),
+                   F.highshelf(10000.0, 2.0, 0.7, sr)],
                sends={"room": 0.12}, filter_curve=fcurve)
 
-    mx.channel("ohat", gain_db=-20.5, pan=-0.20, width=1.22, hp=420.0,
+    mx.channel("ohat", gain_db=-13.0, pan=-0.20, width=1.22, hp=420.0,
                duck=0.30, sends={"room": 0.16}, filter_curve=fcurve)
 
-    mx.channel("shaker", gain_db=-26.0, pan=0.40, width=1.1, hp=2500.0,
+    mx.channel("shaker", gain_db=-18.0, pan=0.40, width=1.1, hp=2500.0,
                sends={"room": 0.10}, filter_curve=fcurve)
 
-    mx.channel("rim", gain_db=-23.0, pan=-0.44, hp=300.0,
+    mx.channel("rim", gain_db=-18.5, pan=-0.44, hp=300.0,
                sends={"room": 0.22, "delay": 0.12}, filter_curve=fcurve)
 
-    mx.channel("stab", gain_db=-15.0, width=1.30, duck=0.62, hp=170.0,
+    mx.channel("stab", gain_db=-10.5, width=1.30, duck=0.62, hp=170.0,
                eq=[F.peaking(430.0, -3.2, 1.0, sr),
-                   F.peaking(5200.0, 2.0, 0.9, sr)],
+                   F.peaking(5200.0, 3.0, 0.9, sr)],
                comp=dict(threshold=-22.0, ratio=2.5, attack=0.008,
                          release=0.130, makeup=2.5),
                sends={"plate": 0.30, "delay": 0.18, "room": 0.08},
                filter_curve=fcurve)
 
-    mx.channel("pad", gain_db=-21.0, width=1.50, duck=0.55, hp=150.0,
+    mx.channel("pad", gain_db=-17.0, width=1.50, duck=0.55, hp=150.0,
                eq=[F.peaking(330.0, -3.5, 0.9, sr),
                    F.highshelf(9000.0, 1.5, 0.7, sr)],
                sends={"hall": 0.55, "plate": 0.15},
                filter_curve=fcurve)
 
-    mx.channel("keys", gain_db=-17.0, width=1.20, duck=0.35, hp=200.0,
+    mx.channel("keys", gain_db=-15.0, width=1.20, duck=0.35, hp=200.0,
                eq=[F.peaking(400.0, -2.0, 1.0, sr)],
                sends={"plate": 0.34, "delay": 0.18, "hall": 0.12},
                filter_curve=fcurve)
 
-    mx.channel("arp", gain_db=-23.0, width=1.25, duck=0.42, hp=420.0,
+    mx.channel("arp", gain_db=-16.5, width=1.25, duck=0.42, hp=420.0,
                eq=[F.highshelf(8000.0, 1.5, 0.7, sr)],
                sends={"delay": 0.48, "plate": 0.22},
                filter_curve=fcurve)
 
-    mx.channel("vox", gain_db=-21.0, width=1.18, duck=0.45, hp=220.0,
+    mx.channel("vox", gain_db=-17.5, width=1.18, duck=0.45, hp=220.0,
                eq=[F.peaking(3000.0, 2.0, 1.0, sr)],
                sends={"hall": 0.40, "delay": 0.22, "plate": 0.18},
                filter_curve=fcurve)
 
-    mx.channel("melody", gain_db=-19.0, pan=-0.16, width=1.1, duck=0.35,
+    mx.channel("melody", gain_db=-16.0, pan=-0.16, width=1.1, duck=0.35,
                hp=250.0, sends={"plate": 0.32, "delay": 0.30},
                filter_curve=fcurve)
 
-    mx.channel("fx", gain_db=-17.0, width=1.40, hp=180.0,
+    mx.channel("fx", gain_db=-14.5, width=1.40, hp=180.0,
                sends={"hall": 0.30, "plate": 0.18})
 
     return mx
@@ -504,6 +529,30 @@ def write_wav(path, x, sr, bits=24):
     return path
 
 
+def encode_mp3(wav_path, mp3_path, bitrate="320k"):
+    """
+    Encode a 320 kbps MP3 via ffmpeg, if it is available.
+
+    The master is limited to -0.9 dBFS rather than 0.0 precisely so this step
+    is safe: MP3 decoding reconstructs inter-sample peaks that can sit above
+    the highest sample in the source, and a master pushed to 0.0 will clip on
+    playback even though the WAV measures clean.
+    """
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        print("  (ffmpeg not found -- skipping MP3)")
+        return None
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", wav_path,
+         "-codec:a", "libmp3lame", "-b:a", bitrate, mp3_path],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  (MP3 encode failed: {r.stderr.strip()[:200]})")
+        return None
+    return mp3_path
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -538,9 +587,12 @@ def build_track(sr=SR, verbose=True):
               f"{len(kicks)} kick triggers)")
     mix = mx.render(duck, verbose)
 
+    mix *= build_section_gain(clock, n, sr)[:, None]
+
     if verbose:
         print("[5/5] mastering")
-    master = master_chain(mix, sr, target_peak_db=-0.9, verbose=verbose)
+    master = master_chain(mix, sr, target_lufs=-9.3, ceiling_db=-1.0,
+                          verbose=verbose)
 
     if verbose:
         print(f"\nrendered in {time.time() - t0:.1f}s")
@@ -559,15 +611,28 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     stem = os.path.join(args.out, "midnight_transit")
 
-    write_wav(f"{stem}_master_24bit_48k.wav", master, SR, 24)
+    outputs = []
+    outputs.append(write_wav(f"{stem}_master_24bit_48k.wav", master, SR, 24))
 
+    # 16-bit / 44.1 kHz for CD-rate delivery. resample_poly's 147/160 ratio is
+    # exact (44100/48000), so this is a clean rational resample rather than an
+    # interpolation with drift.
     from scipy.signal import resample_poly
-    cd = np.stack([resample_poly(master[:, c], 147, 160) for c in range(2)], axis=-1)
-    cd = np.clip(cd, -db(-0.9), db(-0.9))
-    write_wav(f"{stem}_master_16bit_44k.wav", cd, 44100, 16)
+    cd = np.stack([resample_poly(master[:, c], 147, 160) for c in range(2)],
+                  axis=-1)
+    # Resampling can nudge peaks slightly above the source ceiling.
+    cd = np.clip(cd, -db(-1.0), db(-1.0))
+    outputs.append(write_wav(f"{stem}_master_16bit_44k.wav", cd, 44100, 16))
+
+    mp3 = encode_mp3(outputs[0], f"{stem}.mp3")
+    if mp3:
+        outputs.append(mp3)
 
     print()
     print(A.report(master, SR, "MASTER"))
+    print("\nfiles written:")
+    for f in outputs:
+        print(f"  {f}  ({os.path.getsize(f)/1e6:.1f} MB)")
 
     return stem
 

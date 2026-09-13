@@ -40,6 +40,28 @@ def _block_peak(x, block):
     return xp.reshape(nb, block).max(axis=1), nb
 
 
+def _true_block_peak(y, block, sr, oversample=4):
+    """
+    Per-block peak measured on an oversampled copy of the signal.
+
+    A digital sample stream only stores points on the waveform; the analog
+    signal a converter reconstructs between those points can be higher than
+    any stored sample. Those inter-sample (true) peaks are what clip a DAC or
+    an MP3 decoder even when the file measures below 0 dBFS. Detecting on a
+    4x-upsampled copy sees them; detecting on the raw samples does not.
+    """
+    n = len(y)
+    nb = int(np.ceil(n / block))
+    peaks = np.zeros(nb)
+    for c in range(y.shape[1]):
+        up = resample_poly(y[:, c].astype(np.float32), oversample, 1)
+        bp, _ = _block_peak(up, block * oversample)
+        if len(bp) < nb:
+            bp = np.concatenate([bp, np.zeros(nb - len(bp))])
+        peaks = np.maximum(peaks, bp[:nb])
+    return peaks
+
+
 def _expand(curve, block, n):
     """Block-rate curve -> sample rate, linearly interpolated."""
     src = np.arange(len(curve)) * block + block * 0.5
@@ -232,7 +254,8 @@ def saturate(x, drive=1.5, mode="tanh", sr=SR, oversample=4, mix=1.0):
 # Limiting
 # --------------------------------------------------------------------------
 
-def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070, block=16):
+def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070,
+          block=16, true_peak=True):
     """
     Look-ahead brickwall limiter.
 
@@ -253,17 +276,21 @@ def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070, block=16):
     requirement -- so smoothing can never reintroduce an overshoot. No clipping
     stage is needed to catch it.
 
-    The ceiling sits below 0 dBFS on purpose: inter-sample peaks between
-    digital samples can exceed the sample values themselves, and lossy encoders
-    reconstruct those, so a track mastered to exactly 0.0 distorts once it
-    becomes an MP3.
+    With `true_peak` enabled the detector measures an oversampled copy, so the
+    ceiling is honoured in dBTP (true peak) rather than dBFS. This is the
+    difference between a master that survives MP3 encoding and one that
+    crackles on playback despite measuring clean as a WAV.
     """
     mono_in = x.ndim == 1
     y = x[:, None] if mono_in else x
     n = len(y)
 
     ceiling = db(ceiling_db)
-    peak, nb = _block_peak(np.max(np.abs(y), axis=1), block)
+    if true_peak:
+        peak = _true_block_peak(y, block, sr)
+        nb = len(peak)
+    else:
+        peak, nb = _block_peak(np.max(np.abs(y), axis=1), block)
 
     need = np.ones(nb)
     hot = peak > ceiling

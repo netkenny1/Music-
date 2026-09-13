@@ -216,7 +216,7 @@ def build_sections():
     add("outro", 16, 0.35,
         kick=True, kick_until=14, hat="hat", shaker=True,
         bass="bass_simple", bass_until=8, stab="stab", stab_until=4,
-        clap="clap", clap_until=8, filter_sweep=(16000, 700))
+        clap="clap", clap_until=8, filter_sweep=(16000, 900))
 
     return S
 

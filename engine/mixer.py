@@ -187,7 +187,7 @@ class Mixer:
 # Master chain
 # --------------------------------------------------------------------------
 
-def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
+def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     """
     Master processing, in the order that gives the cleanest result.
 
@@ -200,25 +200,31 @@ def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
     4. **Mid/side widening above 300 Hz.** Widening the whole spectrum would
        de-centre the bass; restricting it to the top keeps the low end solid
        while the air and reverb open up.
-    5. **Saturation, blended.** Gentle tube drive at 25% mix rounds peaks and
-       adds harmonics, letting the limiter work less hard for the same volume.
-    6. **Look-ahead limiting.** The final ceiling, and the only stage allowed
-       to touch the peaks.
+    5. **Saturation, blended.** Gentle tube drive rounds peaks and adds
+       harmonics, so the limiter works less hard for the same loudness.
+    6. **Loudness-targeted limiting.** Rather than guessing a drive amount,
+       the chain measures its own LUFS, calculates the gain needed to hit the
+       target, limits, re-measures and corrects. Limiting changes loudness
+       non-linearly (it raises density while capping peaks), so a single
+       calculated gain always lands short -- the second pass closes the gap.
     """
+    import analysis as A     # imported here to keep the DSP layer standalone
+
     y = mix
 
     y = F.apply(y, F.highpass(24.0, 0.707, sr))
 
     y = F.chain(
         y,
-        F.lowshelf(90.0, 1.0, 0.8, sr),       # weight
-        F.peaking(250.0, -1.4, 0.9, sr),      # keep the low-mids uncluttered
-        F.peaking(2800.0, 0.9, 0.7, sr),      # presence
-        F.highshelf(11000.0, 1.6, 0.7, sr),   # air
+        F.lowshelf(80.0, -0.5, 0.8, sr),       # the mix is already bass-forward
+        F.peaking(250.0, -1.6, 0.9, sr),       # keep the low-mids uncluttered
+        F.peaking(2400.0, 1.5, 0.8, sr),       # lower presence
+        F.peaking(4000.0, 3.2, 0.7, sr),       # presence -- the 2-6k cliff
+        F.highshelf(8500.0, 4.0, 0.7, sr),     # air
     )
 
     before = float(np.max(np.abs(y)))
-    y = D.compress(y, sr=sr, threshold=-14.0, ratio=1.8, attack=0.030,
+    y = D.compress(y, sr=sr, threshold=-16.0, ratio=2.0, attack=0.030,
                    release=0.220, knee=8.0, makeup=0.0)
     if verbose:
         gr = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9) / max(before, 1e-9))
@@ -227,17 +233,59 @@ def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
     # width above 300 Hz only
     lo = F.apply(y, F.lowpass(300.0, 0.707, sr))
     hi = y - lo
-    y = lo + S.width(hi, 1.22)
+    y = lo + S.width(hi, 1.30)
     y = S.mono_below(y, 110.0, sr)
 
-    y = D.saturate(y, drive=1.35, mode="tube", sr=sr, oversample=4, mix=0.25)
+    y = D.saturate(y, drive=1.5, mode="tube", sr=sr, oversample=4, mix=0.35)
 
-    # Push into the limiter for club loudness, then catch it at the ceiling.
-    y = y * db(3.0)
-    before = float(np.max(np.abs(y)))
-    y = D.limit(y, sr=sr, ceiling_db=target_peak_db, lookahead=0.005, release=0.070)
+    # --- loudness-targeted limiting ---------------------------------------
+    # Solved rather than guessed. Loudness after limiting is a sub-linear
+    # function of the drive applied: past a point, every extra dB of gain is
+    # partly eaten by extra gain reduction, so a naive "add the shortfall"
+    # correction always undershoots. A secant solver measures that local slope
+    # from the last two attempts and steps by shortfall/slope instead, which
+    # converges in two or three passes instead of crawling.
+    measured = A.lufs_integrated(y, sr)
     if verbose:
-        print(f"    limiter       input peak {20*np.log10(max(before,1e-9)):+5.1f} dBFS"
-              f" -> {20*np.log10(max(float(np.max(np.abs(y))),1e-9)):+5.1f} dBFS")
+        print(f"    pre-limiter   {measured:6.2f} LUFS")
 
-    return y
+    def run(gain_db):
+        out = D.limit(y * db(gain_db), sr=sr, ceiling_db=ceiling_db,
+                      lookahead=0.005, release=0.070)
+        return out, A.lufs_integrated(out, sr)
+
+    g_prev = target_lufs - measured
+    out, l_prev = run(g_prev)
+    best = (abs(target_lufs - l_prev), g_prev, out)
+
+    g = g_prev + (target_lufs - l_prev)
+    for _ in range(4):
+        if abs(target_lufs - l_prev) < 0.15:
+            break
+        out, l = run(g)
+        if abs(target_lufs - l) < best[0]:
+            best = (abs(target_lufs - l), g, out)
+
+        raw_slope = (l - l_prev) / (g - g_prev) if abs(g - g_prev) > 1e-6 else 1.0
+        # Saturation guard: if extra drive has stopped buying loudness, the
+        # material has hit the ceiling its own waveform allows. Pushing
+        # further only flattens transients for nothing, so stop and keep the
+        # least-driven result that got closest.
+        if raw_slope < 0.15:
+            if verbose:
+                print(f"    limiter       loudness saturated at {l:.2f} LUFS"
+                      f" -- holding drive rather than over-limiting")
+            break
+
+        slope = float(np.clip(raw_slope, 0.25, 1.0))
+        g_prev, l_prev = g, l
+        g = g + (target_lufs - l) / slope
+
+    out = best[2]
+    if verbose:
+        print(f"    limiter       drive {best[1]:+.2f} dB -> "
+              f"{A.lufs_integrated(out, sr):.2f} LUFS "
+              f"(target {target_lufs:.1f}), "
+              f"peak {20*np.log10(max(float(np.max(np.abs(out))),1e-9)):+.2f} dBFS")
+
+    return out

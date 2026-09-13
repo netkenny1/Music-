@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from scipy.signal import welch
 
-from dsp.core import SR, sine, saw, square, stereo, to_db, adsr, perc_env, pan
+from dsp.core import (SR, sine, saw, square, noise, stereo, to_db, adsr,
+                      perc_env, pan)
 from dsp import filters as F
 from dsp import dynamics as D
 from dsp import space as S
@@ -157,8 +158,17 @@ def test_compressor():
     print("\ncompressor")
     loud = stereo(sine(440.0, SR * 2) * 0.9, sine(440.0, SR * 2) * 0.9)
     out = D.compress(loud, threshold=-20.0, ratio=4.0, makeup=0.0)
-    red = A.sample_peak_db(out) - A.sample_peak_db(loud)
-    check("reduces level above threshold", red < -8.0, f"{red:+.1f} dB")
+    # Measure after the attack has settled. The first few milliseconds pass
+    # through at full level by design -- that overshoot is what an attack time
+    # *is* -- so a whole-buffer peak reading describes the transient, not the
+    # compression.
+    red = A.sample_peak_db(out[SR:]) - A.sample_peak_db(loud[SR:])
+    check("reduces level above threshold", red < -8.0, f"{red:+.1f} dB steady state")
+
+    # -20 dBFS in at 4:1 over a -20 dB threshold should give ~-14 dB
+    expected = (1.0 / 4.0 - 1.0) * (A.sample_peak_db(loud) - (-20.0))
+    check("reduction matches the ratio", abs(red - expected) < 1.5,
+          f"predicted {expected:+.1f} dB, measured {red:+.1f} dB")
 
     soft = stereo(sine(440.0, SR * 2) * 0.02, sine(440.0, SR * 2) * 0.02)
     out = D.compress(soft, threshold=-20.0, ratio=4.0, makeup=0.0)
@@ -174,14 +184,18 @@ def test_compressor():
 
 def test_saturation():
     print("\nsaturation")
-    x = sine(6000.0, SR) * 0.9
+    # 7 kHz is chosen deliberately: tanh generates odd harmonics, and the 7th
+    # (49 kHz) folds back to 1 kHz at a 48 kHz sample rate -- squarely inside
+    # the measurement band and nowhere near a real harmonic. With a 6 kHz
+    # fundamental every alias lands back on top of a harmonic and the test
+    # cannot see the difference at all.
+    x = sine(7000.0, SR) * 0.9
     plain = np.tanh(x * 4.0)
     os4 = D.saturate(x, 4.0, "tanh", oversample=4)
 
     def alias_energy(y):
         fr, p = welch(y, SR, nperseg=16384)
-        # harmonics of 6 kHz above Nyquist fold back below it at these spots
-        mask = (fr > 500) & (fr < 5500)
+        mask = (fr > 500) & (fr < 3000)
         return np.trapezoid(p[mask], fr[mask]) / np.trapezoid(p, fr)
 
     a_plain, a_os = alias_energy(plain), alias_energy(os4)
@@ -208,10 +222,25 @@ def test_space():
     check("reverb decay near requested RT60", 1.2 < measured < 3.2,
           f"asked 2.0 s, measured {measured:.2f} s")
 
-    wide = stereo(sine(1000.0, SR), -sine(1000.0, SR))   # fully out of phase
-    check("mono_below removes out-of-phase low end",
-          A.correlation(S.mono_below(
-              stereo(sine(50.0, SR), -sine(50.0, SR)), 120.0)) > 0.9)
+    # Quadrature bass: the two channels are fully decorrelated (correlation 0)
+    # but both carry real energy, so there is something for mono_below to
+    # centre. Perfectly anti-phase bass is pure side signal, and mono_below
+    # correctly annihilates it rather than centring it -- a valid result, but
+    # a degenerate one that says nothing about the centring behaviour.
+    quad = stereo(np.sin(2 * np.pi * 50.0 * np.arange(SR) / SR),
+                  np.cos(2 * np.pi * 50.0 * np.arange(SR) / SR))
+    check("decorrelated bass starts uncentred",
+          abs(A.bass_correlation(quad)) < 0.2,
+          f"correlation {A.bass_correlation(quad):+.3f}")
+    centred = S.mono_below(quad, 120.0)
+    check("mono_below centres the low end",
+          A.bass_correlation(centred) > 0.99,
+          f"correlation {A.bass_correlation(centred):+.3f}")
+    # and it must leave the highs alone
+    hi = stereo(sine(3000.0, SR), noise(SR, seed=9) * 0.3)
+    check("mono_below leaves the top end untouched",
+          abs(A.high_correlation(S.mono_below(hi, 120.0), fc=1000.0)
+              - A.high_correlation(hi, fc=1000.0)) < 0.02)
     check("width=0 collapses to mono",
           A.correlation(S.width(stereo(sine(400.0, SR),
                                        sine(404.0, SR)), 0.0)) > 0.999)

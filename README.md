@@ -136,6 +136,41 @@ G4   F4   G4   Bb4
 That smooth voice leading is why the loop feels like it circles rather than
 restarts.
 
+## Measured output
+
+The master is judged by meters, not by hope. `engine/analysis.py` implements
+ITU-R BS.1770-4 loudness, true-peak detection and stereo correlation, and
+`engine/inspect_master.py FILE` prints a full report for any rendered WAV.
+
+| Metric | Value | Why it matters |
+|---|---|---|
+| Integrated loudness | ≈ −10 LUFS | Club level; sits alongside commercial dance masters |
+| Loudness range | ≈ 4.2 LU | Real contrast between breakdown and drop |
+| True peak | ≈ −1.0 dBTP | Survives MP3 encoding without clipping |
+| Crest factor | ≈ 10 dB | Loud but not squashed flat |
+| Bass correlation | 1.00 | Low end is perfectly mono — no cancellation on a club sub |
+| High correlation | ≈ 0.44 | Wide stereo image above 300 Hz |
+| Mono sum delta | ≈ −0.3 dB | Almost nothing lost when summed to mono |
+
+The true-peak number is the one worth explaining. An early render measured
+−0.90 dBFS by sample peak but **+0.82 dBTP** — the waveform *between* samples
+exceeded full scale, which an MP3 decoder reconstructs and clips. The limiter
+now detects on a 4× oversampled copy, and the delivered MP3 decodes at
+−0.1 dBTP with zero clipped samples.
+
+## Validation
+
+```bash
+python3 engine/tests.py
+```
+
+44 checks covering the properties the mix depends on: that PolyBLEP actually
+suppresses aliasing, that the limiter never exceeds its ceiling and is exactly
+transparent below it, that filters attenuate where they claim to, that
+oversampling removes distortion aliasing, that the mono-maker centres the low
+end, and that the loudness meter matches the reference values published in
+ITU-R BS.1770.
+
 ## Licence
 
 MIT.
