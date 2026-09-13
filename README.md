@@ -36,7 +36,8 @@ sustaining more than two bars before the window is not there.
 
 Mixing runs the sixteen channel strips, then the four reverb buses, across
 every core by default. The strips are independent until the sum, so the
-parallel path is designed to give the identical result to the serial one.
+parallel result is bit-identical to the serial one, not merely close --
+verified with `np.array_equal` on the master output.
 
 ## How it is built
 

@@ -351,9 +351,14 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     if verbose:
         print(f"    pre-limiter   {measured:6.2f} LUFS")
 
+    # Oversample for true-peak detection once; every pass below is the same
+    # signal at a different scalar gain, so its block peaks are peak0 * gain.
+    peak0 = D._true_block_peak(y, 16, sr)
+
     def run(gain_db):
         out = D.limit(y * db(gain_db), sr=sr, ceiling_db=ceiling_db,
-                      lookahead=0.005, release=0.070)
+                      lookahead=0.005, release=0.070,
+                      peak=peak0 * db(gain_db))
         return out, A.lufs_integrated(out, sr)
 
     g_prev = target_lufs - measured

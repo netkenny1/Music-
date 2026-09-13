@@ -255,7 +255,7 @@ def saturate(x, drive=1.5, mode="tanh", sr=SR, oversample=4, mix=1.0):
 # --------------------------------------------------------------------------
 
 def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070,
-          block=16, true_peak=True):
+          block=16, true_peak=True, peak=None):
     """
     Look-ahead brickwall limiter.
 
@@ -286,7 +286,17 @@ def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070,
     n = len(y)
 
     ceiling = db(ceiling_db)
-    if true_peak:
+    # `peak` lets a caller supply the per-block peak array instead of having
+    # it measured here. The true-peak detector is the expensive part of a
+    # pass (a 4x resample of the whole signal), and a loudness-targeting loop
+    # calls the limiter several times on the *same* signal at different
+    # scalar gains. The true peak of g*y is exactly g times the true peak of
+    # y, so the caller can oversample once and pass peak0*g each time. The
+    # detector resamples in float32, so float32(g*y) and g*float32(y) round
+    # differently: outputs agree to ~2e-7 (-130 dB), not bit-for-bit.
+    if peak is not None:
+        nb = len(peak)
+    elif true_peak:
         peak = _true_block_peak(y, block, sr)
         nb = len(peak)
     else:
