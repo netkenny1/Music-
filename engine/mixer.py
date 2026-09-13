@@ -15,6 +15,9 @@ the *same* simulated room is what makes them sound like one performance
 instead of a stack of separate recordings.
 """
 
+import multiprocessing as mp
+import os
+
 import numpy as np
 
 from dsp.core import SR, db, stereo
@@ -27,12 +30,66 @@ from dsp import space as S
 # Channel strip
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Parallel processing
+# --------------------------------------------------------------------------
+#
+# Channel strips are independent of one another until the sum, and reverb
+# buses are independent of one another until the sum, so both stages are
+# embarrassingly parallel. The buffers are large (a 200 s stereo channel at
+# 48 kHz is ~160 MB) and there are sixteen of them, so instead of pickling
+# them out to workers the mixer is stashed in a module global and the pool is
+# started with fork(): every child inherits the parent's memory copy-on-write
+# and reads its channel for free. Only the processed result crosses back.
+#
+# Each worker also pins BLAS/OpenMP to one thread: the DSP here is
+# element-wise numpy and scipy.signal, which do not benefit from threading,
+# and four processes each spawning four threads would just thrash the cores.
+
+_SHARED = {}
+
+
+def _limit_threads():
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ[var] = "1"
+
+
+def _process_channel(name):
+    mx, duck = _SHARED["mx"], _SHARED["duck"]
+    ch = mx.channels[name]
+    y = ch.process(duck)
+    return name, y, ch.gr_db, ch.peak_in
+
+
+def _process_bus(bus_name):
+    mx, duck = _SHARED["mx"], _SHARED["duck"]
+    cfg = mx.buses[bus_name]
+    src = _SHARED["sends"][bus_name]
+    wet = S.convolve(src, cfg["ir"])
+    for coeffs in cfg["eq"]:
+        wet = F.apply(wet, coeffs)
+    if cfg["width"] != 1.0:
+        wet = S.width(wet, cfg["width"])
+    if cfg["duck"] > 0 and duck is not None:
+        wet = wet * (1.0 - cfg["duck"] * (1.0 - duck))[:, None]
+    return bus_name, wet * db(cfg["gain_db"])
+
+
+def _pool(jobs):
+    """Fork pool sized to the machine, or None when there is nothing to gain."""
+    n = min(jobs, os.cpu_count() or 1)
+    if n <= 1:
+        return None
+    return mp.get_context("fork").Pool(n, initializer=_limit_threads)
+
+
 class Channel:
     """One instrument's signal path from raw buffer to the mix bus."""
 
     def __init__(self, name, n, sr=SR, gain_db=0.0, pan=0.0, width=1.0,
                  eq=None, comp=None, sends=None, duck=0.0, mono_below=None,
-                 sat=None, hp=None, lp=None, filter_curve=None):
+                 sat=None, hp=None, lp=None, filter_curve=None,
+                 excite=None):
         self.name = name
         self.sr = sr
         self.buf = np.zeros((n, 2))
@@ -48,6 +105,7 @@ class Channel:
         self.hp = hp                        # channel high-pass Hz
         self.lp = lp                        # channel low-pass Hz
         self.filter_curve = filter_curve    # per-sample cutoff automation
+        self.excite = excite                # dict of exciter() kwargs
         self.peak_in = 0.0
         self.gr_db = 0.0
 
@@ -94,24 +152,30 @@ class Channel:
         for coeffs in self.eq:
             y = F.apply(y, coeffs)
 
-        # 4. Colour
+        # 4. Presence. The exciter sits after the EQ so the tone shaping
+        #    decides which band breeds the new harmonics, and before the
+        #    compressor so its output is levelled with everything else.
+        if self.excite:
+            y = D.exciter(y, sr=self.sr, **self.excite)
+
+        # 5. Colour
         if self.sat:
             y = D.saturate(y, sr=self.sr, **self.sat)
 
-        # 5. Dynamics
+        # 6. Dynamics
         if self.comp:
             before = float(np.max(np.abs(y)))
             y = D.compress(y, sr=self.sr, **self.comp)
             after = float(np.max(np.abs(y)))
             self.gr_db = 20 * np.log10(max(after, 1e-9) / max(before, 1e-9))
 
-        # 6. Sidechain pump, applied after compression so the compressor's own
+        # 7. Sidechain pump, applied after compression so the compressor's own
         #    release does not fight the ducking curve.
         if self.duck > 0 and duck_env is not None:
             env = 1.0 - self.duck * (1.0 - duck_env)
             y = y * env[:, None]
 
-        # 7. Stereo placement
+        # 8. Stereo placement
         if self.width != 1.0:
             y = S.width(y, self.width)
         if self.mono_below:
@@ -142,43 +206,71 @@ class Mixer:
         self.buses[name] = dict(ir=ir, gain_db=gain_db, eq=eq or [],
                                 width=width, duck=duck)
 
-    def render(self, duck_env=None, verbose=True):
-        """Sum channels, run the sends, and return the pre-master mix."""
+    def render(self, duck_env=None, verbose=True, keep_stems=False,
+               parallel=True):
+        """Sum channels, run the sends, and return the pre-master mix.
+
+        With `keep_stems` the processed output of every channel and bus is
+        retained in `self.stems`. Diagnosing a spectral problem in the sum
+        is guesswork; diagnosing it per channel is measurement.
+
+        `parallel` runs the channel strips, then the reverb buses, across
+        all cores. Results are identical to the serial path: every strip is
+        a pure function of its own buffer and the shared duck envelope.
+        """
         mix = np.zeros((self.n, 2))
         send_bufs = {k: np.zeros((self.n, 2)) for k in self.buses}
+        if keep_stems:
+            self.stems = {}
 
-        for name, ch in self.channels.items():
-            y = ch.process(duck_env)
-            if not np.any(y):
-                continue
-            mix += y
-            for bus_name, level in ch.sends.items():
-                if bus_name in send_bufs and level > 0:
-                    send_bufs[bus_name] += y * level
-            if verbose:
-                pk = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9))
-                print(f"    {name:12s} peak {pk:6.1f} dBFS"
-                      f"{'  GR ' + format(ch.gr_db, '5.1f') + ' dB' if ch.comp else ''}")
+        # -- channel strips ---------------------------------------------
+        names = [nm for nm, ch in self.channels.items() if np.any(ch.buf)]
+        _SHARED.update(mx=self, duck=duck_env)
+        pool = _pool(len(names)) if parallel else None
+        try:
+            if pool is None:
+                results = map(_process_channel, names)
+            else:
+                results = pool.imap(_process_channel, names)
+            for name, y, gr_db, peak_in in results:
+                ch = self.channels[name]
+                ch.gr_db, ch.peak_in = gr_db, peak_in
+                mix += y
+                for bus_name, level in ch.sends.items():
+                    if bus_name in send_bufs and level > 0:
+                        send_bufs[bus_name] += y * level
+                if keep_stems:
+                    self.stems[name] = y
+                if verbose:
+                    pk = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9))
+                    print(f"    {name:12s} peak {pk:6.1f} dBFS"
+                          f"{'  GR ' + format(ch.gr_db, '5.1f') + ' dB' if ch.comp else ''}",
+                          flush=True)
+        finally:
+            if pool is not None:
+                pool.close(); pool.join()
 
-        for bus_name, cfg in self.buses.items():
-            src = send_bufs[bus_name]
-            if not np.any(src):
-                continue
-            wet = S.convolve(src, cfg["ir"])
-            for coeffs in cfg["eq"]:
-                wet = F.apply(wet, coeffs)
-            if cfg["width"] != 1.0:
-                wet = S.width(wet, cfg["width"])
-            # Ducking the reverb returns too keeps the tails from filling the
-            # gaps the sidechain just carved open.
-            if cfg["duck"] > 0 and duck_env is not None:
-                wet = wet * (1.0 - cfg["duck"] * (1.0 - duck_env))[:, None]
-            wet = wet * db(cfg["gain_db"])
-            self.bus_returns[bus_name] = wet
-            mix += wet
-            if verbose:
-                pk = 20 * np.log10(max(float(np.max(np.abs(wet))), 1e-9))
-                print(f"    [{bus_name:10s}] peak {pk:6.1f} dBFS")
+        # -- effect buses --------------------------------------------------
+        live = [b for b in self.buses if np.any(send_bufs[b])]
+        _SHARED.update(sends=send_bufs)
+        pool = _pool(len(live)) if parallel else None
+        try:
+            if pool is None:
+                results = map(_process_bus, live)
+            else:
+                results = pool.imap(_process_bus, live)
+            for bus_name, wet in results:
+                self.bus_returns[bus_name] = wet
+                if keep_stems:
+                    self.stems[f"[{bus_name}]"] = wet
+                mix += wet
+                if verbose:
+                    pk = 20 * np.log10(max(float(np.max(np.abs(wet))), 1e-9))
+                    print(f"    [{bus_name:10s}] peak {pk:6.1f} dBFS", flush=True)
+        finally:
+            if pool is not None:
+                pool.close(); pool.join()
+            _SHARED.clear()
 
         return mix
 
@@ -187,7 +279,7 @@ class Mixer:
 # Master chain
 # --------------------------------------------------------------------------
 
-def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
+def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     """
     Master processing, in the order that gives the cleanest result.
 
@@ -200,25 +292,42 @@ def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
     4. **Mid/side widening above 300 Hz.** Widening the whole spectrum would
        de-centre the bass; restricting it to the top keeps the low end solid
        while the air and reverb open up.
-    5. **Saturation, blended.** Gentle tube drive at 25% mix rounds peaks and
-       adds harmonics, letting the limiter work less hard for the same volume.
-    6. **Look-ahead limiting.** The final ceiling, and the only stage allowed
-       to touch the peaks.
+    5. **Saturation, blended.** Gentle tube drive rounds peaks and adds
+       harmonics, so the limiter works less hard for the same loudness.
+    6. **Loudness-targeted limiting.** Rather than guessing a drive amount,
+       the chain measures its own LUFS, calculates the gain needed to hit the
+       target, limits, re-measures and corrects. Limiting changes loudness
+       non-linearly (it raises density while capping peaks), so a single
+       calculated gain always lands short -- the second pass closes the gap.
     """
+    import analysis as A     # imported here to keep the DSP layer standalone
+
     y = mix
 
     y = F.apply(y, F.highpass(24.0, 0.707, sr))
 
     y = F.chain(
         y,
-        F.lowshelf(90.0, 1.0, 0.8, sr),       # weight
-        F.peaking(250.0, -1.4, 0.9, sr),      # keep the low-mids uncluttered
-        F.peaking(2800.0, 0.9, 0.7, sr),      # presence
-        F.highshelf(11000.0, 1.6, 0.7, sr),   # air
+        F.lowshelf(80.0, -0.9, 0.8, sr),       # the mix is already bass-forward
+        # 250 Hz used to be cut 1.6 dB to "keep the low-mids uncluttered".
+        # Measurement said the opposite: 160-400 Hz was already 7 dB below a
+        # pink reference, so the cut was deepening a hole rather than clearing
+        # mud. The boxiness it was aimed at actually sat an octave up, where
+        # four melodic voices all peaked at once.
+        F.peaking(250.0, -0.6, 0.9, sr),
+        F.peaking(540.0, -1.2, 1.1, sr),       # the shared pile-up
+        F.peaking(2400.0, 1.2, 0.8, sr),
+        # 4 kHz and above used to be pushed +3.2 and +4.0 dB. With nothing but
+        # noise percussion living up there, that was amplifying hiss to chase a
+        # presence the source never had. The channel exciters now generate real
+        # harmonics instead, so the master only has to tilt, not rescue.
+        F.peaking(4000.0, 2.4, 0.7, sr),
+        F.highshelf(9000.0, 3.2, 0.7, sr),     # air
+        F.highshelf(14000.0, 1.5, 0.6, sr),    # the top octave
     )
 
     before = float(np.max(np.abs(y)))
-    y = D.compress(y, sr=sr, threshold=-14.0, ratio=1.8, attack=0.030,
+    y = D.compress(y, sr=sr, threshold=-16.0, ratio=2.0, attack=0.030,
                    release=0.220, knee=8.0, makeup=0.0)
     if verbose:
         gr = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9) / max(before, 1e-9))
@@ -227,17 +336,64 @@ def master_chain(mix, sr=SR, target_peak_db=-0.9, verbose=True):
     # width above 300 Hz only
     lo = F.apply(y, F.lowpass(300.0, 0.707, sr))
     hi = y - lo
-    y = lo + S.width(hi, 1.22)
+    y = lo + S.width(hi, 1.30)
     y = S.mono_below(y, 110.0, sr)
 
-    y = D.saturate(y, drive=1.35, mode="tube", sr=sr, oversample=4, mix=0.25)
+    y = D.saturate(y, drive=1.5, mode="tube", sr=sr, oversample=4, mix=0.35)
 
-    # Push into the limiter for club loudness, then catch it at the ceiling.
-    y = y * db(3.0)
-    before = float(np.max(np.abs(y)))
-    y = D.limit(y, sr=sr, ceiling_db=target_peak_db, lookahead=0.005, release=0.070)
+    # --- loudness-targeted limiting ---------------------------------------
+    # Solved rather than guessed. Loudness after limiting is a sub-linear
+    # function of the drive applied: past a point, every extra dB of gain is
+    # partly eaten by extra gain reduction, so a naive "add the shortfall"
+    # correction always undershoots. A secant solver measures that local slope
+    # from the last two attempts and steps by shortfall/slope instead, which
+    # converges in two or three passes instead of crawling.
+    measured = A.lufs_integrated(y, sr)
     if verbose:
-        print(f"    limiter       input peak {20*np.log10(max(before,1e-9)):+5.1f} dBFS"
-              f" -> {20*np.log10(max(float(np.max(np.abs(y))),1e-9)):+5.1f} dBFS")
+        print(f"    pre-limiter   {measured:6.2f} LUFS")
 
-    return y
+    # Oversample for true-peak detection once; every pass below is the same
+    # signal at a different scalar gain, so its block peaks are peak0 * gain.
+    peak0 = D._true_block_peak(y, 16, sr)
+
+    def run(gain_db):
+        out = D.limit(y * db(gain_db), sr=sr, ceiling_db=ceiling_db,
+                      lookahead=0.005, release=0.070,
+                      peak=peak0 * db(gain_db))
+        return out, A.lufs_integrated(out, sr)
+
+    g_prev = target_lufs - measured
+    out, l_prev = run(g_prev)
+    best = (abs(target_lufs - l_prev), g_prev, out)
+
+    g = g_prev + (target_lufs - l_prev)
+    for _ in range(4):
+        if abs(target_lufs - l_prev) < 0.15:
+            break
+        out, l = run(g)
+        if abs(target_lufs - l) < best[0]:
+            best = (abs(target_lufs - l), g, out)
+
+        raw_slope = (l - l_prev) / (g - g_prev) if abs(g - g_prev) > 1e-6 else 1.0
+        # Saturation guard: if extra drive has stopped buying loudness, the
+        # material has hit the ceiling its own waveform allows. Pushing
+        # further only flattens transients for nothing, so stop and keep the
+        # least-driven result that got closest.
+        if raw_slope < 0.15:
+            if verbose:
+                print(f"    limiter       loudness saturated at {l:.2f} LUFS"
+                      f" -- holding drive rather than over-limiting")
+            break
+
+        slope = float(np.clip(raw_slope, 0.25, 1.0))
+        g_prev, l_prev = g, l
+        g = g + (target_lufs - l) / slope
+
+    out = best[2]
+    if verbose:
+        print(f"    limiter       drive {best[1]:+.2f} dB -> "
+              f"{A.lufs_integrated(out, sr):.2f} LUFS "
+              f"(target {target_lufs:.1f}), "
+              f"peak {20*np.log10(max(float(np.max(np.abs(out))),1e-9)):+.2f} dBFS")
+
+    return out

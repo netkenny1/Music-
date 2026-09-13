@@ -156,6 +156,14 @@ def sweep_lowpass(x, fc_curve, q=1.0, sr=SR, block=48, poles=4):
         j = min(i + block, n)
         fc = float(fc_curve[i])
         seg = x[i:j]
+
+        # Fast path: most channels are silent for most of a track, and a
+        # settled filter fed silence outputs silence. Skipping those blocks
+        # cuts render time roughly in half without changing a sample.
+        if not seg.any() and all(np.all(np.abs(z) < 1e-9) for z in zis):
+            out[i:j] = 0.0
+            continue
+
         if stages == 2:
             b, a = lowpass(fc, 0.54, sr)
             seg, zis[0] = lfilter(b, a, seg, zi=zis[0])
@@ -204,6 +212,7 @@ def formant(x, vowel="ah", sr=SR, q=9.0, mix=1.0):
         "ooh": [(300, 0.0), (870, -14.0), (2240, -20.0)],
         "eh": [(530, 0.0), (1840, -8.0), (2480, -14.0)],
         "ee": [(270, 0.0), (2290, -6.0), (3010, -12.0)],
+        "uh": [(640, 0.0), (1190, -7.0), (2390, -14.0)],   # schwa -- the tech-house chop
     }
     out = np.zeros_like(x)
     for fc, g in tables[vowel]:

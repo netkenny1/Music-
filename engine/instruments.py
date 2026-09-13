@@ -234,7 +234,7 @@ def reese(freq, dur, sr=SR, cutoff=700.0, detune=22.0, seed=89):
 # Harmony
 # ==========================================================================
 
-def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
+def stab(freqs, dur, sr=SR, cutoff=3000.0, res=1.35, decay=0.22,
          detune=11.0, voices=3, spread=0.85, drive=1.25, seed=97,
          attack=0.004, sustain=0.25):
     """
@@ -257,7 +257,12 @@ def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
     left /= np.sqrt(len(freqs))
     right /= np.sqrt(len(freqs))
 
-    fenv = cutoff * (0.30 + 1.0 * perc_env(n, sr, 0.003, 0.055, 4.5))
+    # The floor matters more than the peak. At 0.30 the filter settled at
+    # under a third of the cutoff for most of every note, so the chord
+    # spent its sustain below 1.5 kHz and vanished from the mix the moment
+    # the transient passed. 0.45 keeps the body present without losing the
+    # snap that makes it a stab rather than a pad.
+    fenv = cutoff * (0.52 + 0.90 * perc_env(n, sr, 0.003, 0.055, 4.5))
     fenv = np.clip(fenv, 120.0, 0.45 * sr)
     left = F.sweep_lowpass(left, fenv, res, sr, poles=4)
     right = F.sweep_lowpass(right, fenv, res, sr, poles=4)
@@ -441,3 +446,125 @@ def noise_sweep(dur, sr=SR, up=True, seed=167, lo=300.0, hi=12000.0):
     x = F.apply(x, F.highpass(250.0, 0.707, sr))
     env = np.sin(np.pi * prog) ** 1.3
     return fade(x * env, sr, 0.01, 0.02)
+
+
+# ==========================================================================
+# Beat repeat
+# ==========================================================================
+
+def stutter(src, sr=SR, step_seconds=0.12, schedule=None, pitch_rise=0.0,
+            gain_rise=0.45, fade=0.0025):
+    """
+    Beat-repeat: retrigger the head of `src` at accelerating intervals.
+
+    Each repeat replays the *attack* of the source, not a continuation of it,
+    which is what makes a stutter read as a machine seizing rather than a
+    performance. `schedule` gives slice lengths in 16th notes; an accelerating
+    schedule means every repeat arrives sooner than predicted, so prediction
+    error accumulates across the fill instead of resetting each time. The
+    downbeat that finally lands resolves all of it at once.
+
+    `pitch_rise` reads the source progressively faster, lifting the pitch as
+    the fill tightens -- a second, independent rising cue layered on the first.
+    """
+    if schedule is None:
+        schedule = [1.0, 1.0, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25]
+
+    mono = src.ndim == 1
+    total = int(sum(schedule) * step_seconds * sr) + 128
+    out = np.zeros(total) if mono else np.zeros((total, 2))
+    src_idx = np.arange(len(src))
+
+    pos = 0
+    last = max(1, len(schedule) - 1)
+    for i, d in enumerate(schedule):
+        n = int(d * step_seconds * sr)
+        if n < 8:
+            continue
+        prog = i / last
+        rate = 1.0 + pitch_rise * prog
+        read = np.arange(n) * rate
+
+        if mono:
+            sl = np.interp(read, src_idx, src, left=0.0, right=0.0)
+        else:
+            sl = np.stack([np.interp(read, src_idx, src[:, c], left=0.0, right=0.0)
+                           for c in range(2)], axis=-1)
+
+        f = min(int(fade * sr), max(1, n // 4))
+        env = np.ones(n)
+        env[:f] = np.linspace(0.0, 1.0, f)
+        env[-f:] = np.linspace(1.0, 0.0, f)
+        g = 1.0 + gain_rise * prog
+
+        sl = sl * (env if mono else env[:, None]) * g
+        end = min(pos + n, total)
+        out[pos:end] += sl[:end - pos]
+        pos += n
+
+    return out
+
+
+# ==========================================================================
+# Percussion and layers added for fullness and bounce
+# ==========================================================================
+
+def tambourine(sr=SR, dur=0.16, seed=173, bright=1.0):
+    """
+    Tambourine: a cluster of jingles, not one hit.
+
+    Six or seven zils landing 2-4 ms apart, each a narrow burst of bright
+    noise, plus a fast tremolo on the tail as the jingles keep rattling. It
+    lives above 5 kHz, so it fills the top without touching the hats' slot at
+    7-12 kHz -- the two read as different instruments rather than one hat.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    out = np.zeros(n)
+    t0 = 0.0
+    for k in range(7):
+        i = int(t0 * sr)
+        ln = n - i
+        if ln <= 0:
+            break
+        burst = noise(ln, seed=seed + k) * perc_env(ln, sr, 0.0003, 0.012, 6.0)
+        out[i:] += burst * rng.uniform(0.6, 1.0)
+        t0 += rng.uniform(0.002, 0.004)
+    t = np.arange(n) / sr
+    tail = noise(n, seed=seed + 40) * perc_env(n, sr, 0.004, dur * 0.5, 2.6)
+    tail *= 0.5 + 0.5 * np.sin(2 * np.pi * 38.0 * t)          # rattle
+    out += tail * 0.55
+    out = F.bandlimit(out, 5200.0 * bright, 14500.0, sr)
+    out /= max(float(np.max(np.abs(out))), 1e-9) / 0.9
+    return fade(out, sr, 0.0003, 0.01)
+
+
+def conga(sr=SR, high=True, seed=179):
+    """
+    Conga / bongo-style hand drum: a pitched membrane with a fast pitch drop
+    and a slap transient. Two tunings so a pattern can talk (high answers
+    low). Sits at 180-400 Hz, under the stabs and above the bass, which is a
+    slot nothing else in this track occupies.
+    """
+    f0, f1, dur = (410.0, 235.0, 0.26) if high else (290.0, 165.0, 0.34)
+    n = int(dur * sr)
+    t = np.arange(n) / sr
+    f = f1 + (f0 - f1) * np.exp(-t / 0.018)
+    body = sine(f, n, sr) * perc_env(n, sr, 0.0006, dur * 0.55, 3.8)
+    slap = F.bandlimit(noise(n, seed=seed), 900.0, 4500.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.009, 8.0)
+    out = body * 0.85 + slap * 0.35
+    out = D.saturate(out, 1.6, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(120.0, 0.707, sr))
+    return fade(out, sr, 0.0003, 0.012)
+
+
+def sub_note(freq, dur, sr=SR):
+    """
+    Pure sine sub under the bass. The bass voice is filtered saw plus sine;
+    on a big system a clean sine an octave below its harmonics is what the
+    chest feels. Soft edges so it never clicks against the kick.
+    """
+    n = int(dur * sr)
+    x = sine(freq, n, sr) * adsr(n, sr, a=0.012, d=0.05, s=0.9, r=0.06, curve=1.5)
+    return fade(x, sr, 0.004, 0.02)

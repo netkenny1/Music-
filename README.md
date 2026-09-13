@@ -23,6 +23,33 @@ Renders the full track and prints a mastering report. Output is deterministic �
 every random process is seeded, so the same code always produces the identical
 waveform.
 
+```bash
+python3 engine/render.py --bars 64-88      # just the main drop, for iterating
+python3 engine/render.py --serial          # single-process mixing, for timing
+```
+
+A `--bars` window goes through the same sequencer, mixer and master chain as
+the full track and is written with a `_bars64-88` suffix so it never overwrites
+the master. Two honest caveats: loudness targeting only sees the window, so the
+limiter drive can differ by a fraction of a dB, and anything that started
+sustaining more than two bars before the window is not there.
+
+Mixing runs the sixteen channel strips, then the four reverb buses, across
+every core by default. The strips are independent until the sum, so the
+parallel result is bit-identical to the serial one, not merely close --
+verified with `np.array_equal` on the master output.
+
+Measured on four cores: a full render went from 434 s to 196 s (2.2x). The
+strips themselves went from ~290 s to ~75 s; what remains is sequencing and
+the master chain (~70 s), both still single-process. The fuller 20-channel
+arrangement then cost 232 s, and round-robin note pools for the texture, pads
+and stabs (the drum cache's trick applied to synths) brought it back to 207 s
+-- sequencing 35 s for ~2,500 notes, faster than the original 40 s for far
+fewer. A stage
+profile is what decided this -- instrument synthesis turned out to be under
+10% of the total, so the on-disk instrument cache that seemed like the obvious
+first move was never built.
+
 ## How it is built
 
 Signal flow, top to bottom:
@@ -61,7 +88,8 @@ oscillators ─▶ filters ─▶ envelopes ─▶ instrument voices
 |---|---|
 | `instruments.py` | 21 synthesised voices: drums, bass, chords, pads, ear candy |
 | `composition.py` | Tempo, key, chord progression, rhythm patterns, song structure |
-| `mixer.py` | Channel strips, effect sends, master chain |
+| `groove.py` | Syncopation scoring, micro-timing, polyrhythm and stutter schedules |
+| `mixer.py` | Channel strips, effect sends, master chain, per-channel stem capture |
 | `render.py` | Sequencer and entry point |
 | `analysis.py` | LUFS / true-peak / correlation metering (ITU-R BS.1770-4) |
 
@@ -105,6 +133,173 @@ arrives. Because the minimum's radius is wider than the smoothing radius, the
 smoothing can never reintroduce an overshoot — no clipping stage is needed to
 catch it.
 
+## Expectation and its violation
+
+A groove that is perfectly predictable stops being interesting, and one that is
+unpredictable stops being a groove. The pleasurable middle is measurable.
+
+**Syncopation, scored.** `groove.py` implements the Longuet-Higgins & Lee (1984)
+index: every position in the bar carries a metrical weight (the downbeat
+strongest, the odd 16ths weakest), and a syncopation is counted whenever a
+*rest* at a strong position follows a *note* at a weaker one. The note is heard
+as displaced onto the silence where the strong beat should have been.
+
+```
+weights   0 -4 -3 -4 -2 -4 -3 -4 -1 -4 -3 -4 -2 -4 -3 -4
+```
+
+Witek et al. (2014) found the relationship between this index and the urge to
+move is an inverted U: too little is dull, too much is unreadable, and medium
+syncopation peaks. The track is written to sit on that peak and to step off it
+deliberately at chosen moments.
+
+**What the measurement actually showed.** Scoring the track's combined drum
+*accents* gave **0**. That is not a bug — it is a fact about four-to-the-floor
+house. The continuous 16th hat articulates every metrical position, so there is
+no rest anywhere for a syncopation to be defined against. A saturated kit
+surface cannot be syncopated by adding events to it; the only way in is to
+*remove* them. That measurement is what justified the approach below.
+
+| Surface | drop1 | drop2 | violation bar |
+|---|---|---|---|
+| Kick grid | `xxx.xxx.xxx.xxx.` — 0 | `xxx.xxx.xxx.xxx.` — 0 | `..xxx.xxx.xxx.x.` — **3** |
+| Bass / chords | 8 | 7 | **11** |
+
+So the kit stays deliberately square and the syncopation lives in the bass and
+chord parts, where it rises from 7–8 to 11 on violation bars.
+
+**Micro-timing is not swing.** Swing is a fixed ratio applied to every 16th.
+Micro-timing is a per-instrument offset in milliseconds that stays constant, and
+it is what separates a machine from a player. The kick is pinned to the grid at
+exactly 0.0 ms — it is the reference everything else is heard against — and the
+other parts are pushed or pulled around it:
+
+```
+kick    0.0 ms      bass   -4.0 ms      stab   +3.0 ms
+clap   +9.0 ms      ohat   +5.0 ms      shaker +7.0 ms      vox +8.0 ms
+```
+
+The bass leans early, so it pulls the groove forward. The clap sits nearly 10 ms
+late, which is what makes a backbeat feel relaxed rather than rushed.
+
+**The violations themselves.** Eighteen are placed and catalogued
+(`composition.violation_report()`), sparse in drop1 and dense in drop2 so the
+listener learns the rule before it is broken:
+
+| Bar | Event | What happens |
+|---|---|---|
+| 31 | missing kick | beat-3 kick removed |
+| 35 | pushed clap | backbeat arrives a 16th early |
+| 39 | stutter | accelerating stab retrigger from step 12 |
+| 63 | silence | everything stops from step 12 |
+| 64 | **delayed drop** | downbeat withheld; kick enters early on the last 8th |
+| 69 | anticipated bass | bass lands before the beat and holds through it |
+| 72 | polyrhythm | 3-against-4 layer, realigns every 3 bars |
+| 73 | late chord | stab lands after the beat |
+| 79 | missing kick | downbeat kick removed |
+| 87 | stutter | accelerating arp retrigger from step 8 |
+
+**The delayed drop** is the strongest of them, and it is two violations in
+opposite directions inside one bar. Bar 63 cuts everything from step 12, leaving
+the riser alone. Bar 64 then withholds the downbeat the entire build promised —
+no kick, just a sub drop and a reverse crash. The bar empties out. Then the kick
+arrives *early*, on the last 8th, pre-empting the next downbeat. The beat first
+fails to appear where predicted, then appears where it was not.
+
+Measured on the master, low band under 90 Hz:
+
+```
+bar 63 step 15   hats -46.1 dB, low -34.4 dB     the gap
+bar 64 step  0   -14.8 dB      no kick (real downbeats read -10 dB)
+bar 64 step 12   -22.2 dB      the bar has hollowed out
+bar 64 step 14   -11.5 dB      the early kick, full level
+bar 65 step  0   -10.1 dB      normal service resumes
+```
+
+**Stutters.** `instruments.stutter()` re-triggers the *attack* of a source on an
+accelerating schedule — each repeat is shorter, slightly louder, optionally
+pitched up. A constant-rate repeat is quickly learned and predicted; one that
+accelerates keeps the listener's timing model permanently behind, and the
+downbeat that follows resolves the whole accumulation at once.
+
+**Why any of this works.** Salimpoor et al. (2011) tied musical pleasure to
+dopamine release in the striatum, and the striatal signal tracks *prediction
+error* rather than stimulus intensity. Predictive-coding accounts of groove
+(Vuust & Witek) make the mechanism concrete: the brain continuously predicts the
+next onset, a violation produces an error signal, and resolution back onto the
+grid is the reward. A track with no violations generates no error and no reward.
+The engineering job is to place the errors where they will be resolved.
+
+## Measuring the mix, then fixing it at source
+
+The first master measured fine on a loudness meter and still sounded dark and
+boxy. A third-octave sweep of the main drop against a pink reference said why:
+a **7-15 dB scoop from 160 Hz to 8 kHz**, worst in the 3-5 kHz presence band,
+with a resonant bump at 500-630 Hz sitting inside it. A meter cannot show that;
+only a spectrum can.
+
+Master EQ would have been lipstick, so the mixer gained `keep_stems=` and every
+channel was measured on its own. Three things fell out that no amount of
+listening had made obvious:
+
+* **The presence band contained no music.** Above 2.5 kHz the band leaders were
+  clap, shaker and hats -- noise. The pad produced nothing above 2.5 kHz and the
+  stab nothing above 4 kHz, because their filters closed to under a third of the
+  cutoff for most of every note. The master was already boosting +3.2 dB at 4 kHz
+  and +4 dB at 8.5 kHz and the result was *still* 15 dB under pink: it was
+  amplifying hiss to chase harmonics the source never had.
+* **Four melodic voices peaked in the same band.** arp, melody, rim and vox all
+  had their energy maximum at 400-630 Hz. That is the bump, and it is mutual
+  masking.
+* **The 250 Hz master cut was deepening a hole.** It was there to "clear mud";
+  the low-mids were already 7 dB below pink.
+
+**The exciter.** Opening a lowpass only reveals harmonics an oscillator already
+produced. To *create* presence, `dynamics.exciter()` band-passes the region that
+still has energy (roughly 0.8-3 kHz), saturates it so a 1.2 kHz partial breeds
+new ones at 2.4 and 3.6 kHz, high-passes the result so only the new harmonics
+survive, and blends. Two details decide whether it works at all:
+
+1. The band is normalised into the waveshaper. `tanh(0.02)` is 0.02 to four
+   places -- an isolated 1-3 kHz slice of a mix is always quiet, so without
+   normalisation the shaper is linear and generates nothing whatever the drive.
+2. It is tuned from a *real* note, not a synthetic one. The first pass measured
+   +13 dB on a lowpassed test saw and then +1.6 dB on an actual stab, because
+   the real stab already had content at -50 dB up there and the test source had
+   none. Drive 4.8 / mix 1.4 gives +9.8 dB on the real note with the peak level
+   moving 0.4 dB.
+
+**Slotting.** Each melodic voice was given its own band: rim and arp high-passed
+up out of the pile, the melody given a 1.4 kHz peak, the vox boost moved from
+3 kHz (where it had nothing to lift) to 1.8 kHz. The stab's sustain floor went
+from 0.30 to 0.52 of cutoff so the chord keeps its body instead of closing to a
+mumble after the transient.
+
+**Measured on the main drop, relative to pink, anchored on the kick
+fundamental:**
+
+| band | before | after | change |
+|---|---|---|---|
+| sub 20-63 | +1.1 | +1.1 | 0.0 |
+| bass 63-160 | +5.1 | +5.3 | +0.1 |
+| low-mid 160-400 | -2.8 | -0.6 | **+2.2** |
+| mid 400-1000 | -2.6 | -2.3 | +0.3 |
+| upper-mid 1-3.15k | -6.7 | -5.3 | **+1.5** |
+| presence 3.15-8k | -9.8 | -6.5 | **+3.3** |
+| 500-630 Hz bump | +4.4 | +2.9 | **-1.5** |
+
+The low end did not move, which is the point: everything was fixed above it,
+at source, and the limiter is doing slightly less work than before (glue comp
+-1.5 dB; the final master sits at 5.0 LU).
+
+**Two musical additions** that happen to fill the same holes: the pad now
+doubles its top voice an octave up, quietly, so 1-3 kHz carries something
+harmonic rather than only hats; and a counter-melody (`composition.COUNTER`)
+answers the hook in the second half of the main drop -- every note a chord
+tone, a fifth or more above the hook so the lines never cross, ending Bb-G-F
+onto the root of the next cycle. It is deliberately subtle: +0.7 dB in its
+band, and the stereo image shifts 0.8 dB right when it enters.
+
 ## Arrangement
 
 | Time | Bar | Section | Bars | What happens |
@@ -119,6 +314,42 @@ catch it.
 
 The 16-bar beat-only intro and outro are deliberate: a DJ needs unambiguous
 kick with no melodic content to align against the outgoing track.
+
+### Movement inside the sections
+
+Two references shaped the second pass: *Fusion* (Iglesias & Rayzir) for the
+tech-house groove and *Take My Breath* (The Weeknd) for the pulsing synth
+bass and pumping pads.
+
+| Element | What it does |
+|---|---|
+| **Pulsing octave bass** | Root, octave, root, octave on driving 8ths — short and bright so every hit reads as a separate event. Drives build2 and the first and third phrases of the main drop |
+| **Rolling bass** | Off-8th leaning patterns with octave jumps on alternate hits, rotating with the pulse every 8 bars |
+| **Vocal chops as percussion** | Short "uh"/"ah" syllables on off-beats and pickups, never the downbeat, panned alternately, ducked hard |
+| **Background notes** | A continuous 16th pluck texture under nearly everything; its note order rotates every 8 bars and its pan walks slowly across the field |
+| **Tambourine, congas** | New percussion in slots nothing else occupied — jingles above 5 kHz, hand drums at 180–400 Hz in a two-bar call and answer |
+| **Sine sub** | A pure sine under the bass roots in both drops, for the chest |
+| **Bells** | Answer the stabs every fourth bar of the main drop |
+| **Hat rotation** | Four hat patterns cycling every two bars, so the top never sits still |
+| **Stab sweep** | The chord filter climbs across every 8-bar phrase and resets |
+| **Mini-drops** | Every 8 bars or so inside the drops, something gives way (the top of the kit and chords pulled for one bar) or lands (crash and sub impact on a downbeat, announced by a fill). Bars 32, 68, 76, 84, and a half-drop at 48 when the kick returns in the breakdown |
+| **Swing** | 13 % → 19 % on the 16ths; sidechain pump tightened |
+
+## DJ notes
+
+| | |
+|---|---|
+| Tempo | 124 BPM, grid-locked (kick is never micro-shifted) |
+| Key | F minor — Camelot **4A** (mix with 3A, 5A, 4B) |
+| Mix-in | bars 0–15 (0:00–0:31): kick, hats, filtered — no melodic content to clash |
+| First drop | bar 24 (0:46) |
+| Breakdown | bars 40–55 (1:17–1:48): kick out from bar 40, back at bar 48 |
+| Main drop | bar 64 (**2:04**) — the delayed drop: the downbeat is withheld and the kick enters early on the last 8th, so a beatmatched blend across this bar will feel it |
+| Mix-out | bars 88–103 (2:50–3:21): elements peel away, filter closes, bass out at bar 96, kick to bar 102 |
+| Loudness | −10.6 LUFS integrated, −1.00 dBTP — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth, and streaming platforms normalise to −14 anyway |
+
+The MP3 carries `TBPM` and `TKEY` tags so Rekordbox, Serato and Traktor pick
+the tempo and key up on import rather than guessing.
 
 ## Harmony
 
@@ -135,6 +366,41 @@ G4   F4   G4   Bb4
 
 That smooth voice leading is why the loop feels like it circles rather than
 restarts.
+
+## Measured output
+
+The master is judged by meters, not by hope. `engine/analysis.py` implements
+ITU-R BS.1770-4 loudness, true-peak detection and stereo correlation, and
+`engine/inspect_master.py FILE` prints a full report for any rendered WAV.
+
+| Metric | Value | Why it matters |
+|---|---|---|
+| Integrated loudness | ≈ −10.6 LUFS | Club level, deliberately not pushed to the −9 the limiter could reach: at that point it was saturated and flattening the kick |
+| Loudness range | ≈ 5.0 LU | Real contrast between breakdown and drop |
+| True peak | ≈ −1.0 dBTP | Survives MP3 encoding without clipping |
+| Crest factor | ≈ 10 dB | Loud but not squashed flat |
+| Bass correlation | 1.00 | Low end is perfectly mono — no cancellation on a club sub |
+| High correlation | ≈ 0.44 | Wide stereo image above 300 Hz |
+| Mono sum delta | ≈ −0.3 dB | Almost nothing lost when summed to mono |
+
+The true-peak number is the one worth explaining. An early render measured
+−0.90 dBFS by sample peak but **+0.82 dBTP** — the waveform *between* samples
+exceeded full scale, which an MP3 decoder reconstructs and clips. The limiter
+now detects on a 4× oversampled copy, and the delivered MP3 decodes at
+−0.1 dBTP with zero clipped samples.
+
+## Validation
+
+```bash
+python3 engine/tests.py
+```
+
+44 checks covering the properties the mix depends on: that PolyBLEP actually
+suppresses aliasing, that the limiter never exceeds its ceiling and is exactly
+transparent below it, that filters attenuate where they claim to, that
+oversampling removes distortion aliasing, that the mono-maker centres the low
+end, and that the loudness meter matches the reference values published in
+ITU-R BS.1770.
 
 ## Licence
 
