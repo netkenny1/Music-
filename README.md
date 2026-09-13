@@ -40,8 +40,12 @@ parallel result is bit-identical to the serial one, not merely close --
 verified with `np.array_equal` on the master output.
 
 Measured on four cores: a full render went from 434 s to 196 s (2.2x). The
-strips themselves went from ~290 s to ~75 s; what remains is sequencing
-(40 s) and the master chain (~70 s), both still single-process. A stage
+strips themselves went from ~290 s to ~75 s; what remains is sequencing and
+the master chain (~70 s), both still single-process. The fuller 20-channel
+arrangement then cost 232 s, and round-robin note pools for the texture, pads
+and stabs (the drum cache's trick applied to synths) brought it back to 207 s
+-- sequencing 35 s for ~2,500 notes, faster than the original 40 s for far
+fewer. A stage
 profile is what decided this -- instrument synthesis turned out to be under
 10% of the total, so the on-disk instrument cache that seemed like the obvious
 first move was never built.
