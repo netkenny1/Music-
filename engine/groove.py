@@ -120,6 +120,7 @@ MICRO_TIMING = {
     "arp":   +1.0,
     "vox":   +8.0,
     "melody": +5.0,
+    "counter": +7.0,   # answers the hook, so it sits a touch further back
 }
 
 

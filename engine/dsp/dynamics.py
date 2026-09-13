@@ -324,3 +324,63 @@ def normalize(x, peak_db=-1.0):
     """Scale so the loudest sample sits at `peak_db`."""
     p = float(np.max(np.abs(x)))
     return x if p == 0 else x * (db(peak_db) / p)
+
+
+def exciter(x, sr=SR, band=(900.0, 3500.0), keep_above=2600.0,
+            drive=3.0, mix=0.5, mode="tanh"):
+    """
+    Aphex-style harmonic exciter: generate new high harmonics from the band
+    below them, then blend only the new content back in.
+
+    This exists because opening a lowpass and adding presence are not the same
+    operation. A filter can only reveal harmonics the oscillator already
+    produced; if the source is genuinely band-limited -- a supersaw stack
+    filtered at 1.5 kHz, say -- there is nothing above the cutoff to uncover,
+    and a shelving boost on the master only amplifies noise.
+
+    The order of operations is what makes it work, and getting it wrong makes
+    the effect useless. Saturating a *high-passed* copy produces almost nothing
+    when the source is dark, because the high-pass has already thrown away
+    everything that could have been distorted. Instead:
+
+      1. band-pass the region that still has energy (`band`),
+      2. saturate *that* -- a 1.2 kHz partial breeds new ones at 2.4 and
+         3.6 kHz, exactly where the presence is missing,
+      3. high-pass the result at `keep_above` so only the newly created
+         harmonics survive, not a second copy of the source,
+      4. blend.
+
+    The saturation runs oversampled; without it the new harmonics -- which by
+    construction sit near the top of the band -- would alias back down into the
+    midrange as inharmonic tones.
+    """
+    lo, hi = band
+    src = F.apply(x, F.highpass(lo, 0.707, sr))
+    src = F.apply(src, F.lowpass(hi, 0.707, sr))
+
+    # Normalise into the shaper. A waveshaper is only nonlinear near full
+    # scale: tanh(0.02) is 0.02 to four decimal places, so feeding it a quiet
+    # band -- which an isolated 1-3 kHz slice of a mix always is -- produces no
+    # harmonics at all regardless of the drive setting. Scaling to unity first
+    # makes `drive` mean the same thing whatever the source level, and the
+    # original peak is restored on the way out.
+    peak = float(np.max(np.abs(src)))
+    if peak < 1e-9:
+        return x
+    har = saturate(src / peak, drive, mode, sr, oversample=4) * peak
+    har = F.hp24(har, keep_above, 0.707, sr)
+    return x + har * mix
+
+
+def tilt(x, pivot=700.0, slope_db=3.0, sr=SR):
+    """
+    Broadband spectral tilt: shelve the top up and the bottom down by the same
+    amount around a pivot, so the overall level barely moves.
+
+    A tilt is the right tool for "too dark" or "too bright" as a whole. Two
+    opposing shelves keep the correction gentle and phase-coherent across the
+    whole spectrum, where a single large shelf would pile the entire change
+    into one end and change the loudness with it.
+    """
+    y = F.apply(x, F.lowshelf(pivot, -slope_db, 0.5, sr))
+    return F.apply(y, F.highshelf(pivot, slope_db, 0.5, sr))

@@ -241,8 +241,9 @@ def build_sections():
     # --- 24 bars: main drop. Full arrangement plus arpeggio and vocals. ----
     add("drop2", 24, 1.00,
         kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
-        bass="bass_busy", stab="stab_synco", pad=True, rim=True,
+        bass="bass_busy", stab="stab_synco", pad=True, rim=True, keys=True,
         arp=True, vox=True, melody=True, crash_at=[8, 16],
+        counter=True, counter_from=12,
         sub_drop=True, fill_bars=[7, 15, 23],
         # THE DELAYED DROP. Bar 0 of the drop is a hole: no kick, no groove,
         # just a sub and the tail of the build hanging in the air. The kick
@@ -285,6 +286,18 @@ MELODY = [
     (80, 75, 6), (88, 72, 4),
     (100, 70, 2), (102, 72, 2), (104, 75, 4), (110, 77, 2),   # Ebadd9
     (112, 75, 8), (122, 72, 4),
+]
+
+# Counter-melody: answers the hook in the gaps it leaves. Every note is a
+# chord tone, and each phrase sits a fifth or more above the hook so the two
+# lines never cross. The last phrase falls Bb -> G -> F, landing on the root
+# of the Fm9 that starts the next cycle -- the resolution is what makes the
+# repeat feel earned rather than looped.
+COUNTER = [
+    (26, 79, 2), (28, 80, 2), (30, 77, 4),                    # Fm9   (G Ab F)
+    (60, 80, 2), (62, 77, 2), (64, 73, 4),                    # Dbmaj7 (Ab F Db)
+    (90, 79, 2), (92, 80, 2), (94, 84, 2), (96, 79, 4),       # Abmaj7 (G Ab C G)
+    (114, 82, 2), (116, 79, 2), (118, 77, 6),                 # Ebadd9 (Bb G F)
 ]
 
 

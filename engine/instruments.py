@@ -234,7 +234,7 @@ def reese(freq, dur, sr=SR, cutoff=700.0, detune=22.0, seed=89):
 # Harmony
 # ==========================================================================
 
-def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
+def stab(freqs, dur, sr=SR, cutoff=3000.0, res=1.35, decay=0.22,
          detune=11.0, voices=3, spread=0.85, drive=1.25, seed=97,
          attack=0.004, sustain=0.25):
     """
@@ -257,7 +257,12 @@ def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
     left /= np.sqrt(len(freqs))
     right /= np.sqrt(len(freqs))
 
-    fenv = cutoff * (0.30 + 1.0 * perc_env(n, sr, 0.003, 0.055, 4.5))
+    # The floor matters more than the peak. At 0.30 the filter settled at
+    # under a third of the cutoff for most of every note, so the chord
+    # spent its sustain below 1.5 kHz and vanished from the mix the moment
+    # the transient passed. 0.45 keeps the body present without losing the
+    # snap that makes it a stab rather than a pad.
+    fenv = cutoff * (0.45 + 0.95 * perc_env(n, sr, 0.003, 0.055, 4.5))
     fenv = np.clip(fenv, 120.0, 0.45 * sr)
     left = F.sweep_lowpass(left, fenv, res, sr, poles=4)
     right = F.sweep_lowpass(right, fenv, res, sr, poles=4)

@@ -32,7 +32,8 @@ class Channel:
 
     def __init__(self, name, n, sr=SR, gain_db=0.0, pan=0.0, width=1.0,
                  eq=None, comp=None, sends=None, duck=0.0, mono_below=None,
-                 sat=None, hp=None, lp=None, filter_curve=None):
+                 sat=None, hp=None, lp=None, filter_curve=None,
+                 excite=None):
         self.name = name
         self.sr = sr
         self.buf = np.zeros((n, 2))
@@ -48,6 +49,7 @@ class Channel:
         self.hp = hp                        # channel high-pass Hz
         self.lp = lp                        # channel low-pass Hz
         self.filter_curve = filter_curve    # per-sample cutoff automation
+        self.excite = excite                # dict of exciter() kwargs
         self.peak_in = 0.0
         self.gr_db = 0.0
 
@@ -94,24 +96,30 @@ class Channel:
         for coeffs in self.eq:
             y = F.apply(y, coeffs)
 
-        # 4. Colour
+        # 4. Presence. The exciter sits after the EQ so the tone shaping
+        #    decides which band breeds the new harmonics, and before the
+        #    compressor so its output is levelled with everything else.
+        if self.excite:
+            y = D.exciter(y, sr=self.sr, **self.excite)
+
+        # 5. Colour
         if self.sat:
             y = D.saturate(y, sr=self.sr, **self.sat)
 
-        # 5. Dynamics
+        # 6. Dynamics
         if self.comp:
             before = float(np.max(np.abs(y)))
             y = D.compress(y, sr=self.sr, **self.comp)
             after = float(np.max(np.abs(y)))
             self.gr_db = 20 * np.log10(max(after, 1e-9) / max(before, 1e-9))
 
-        # 6. Sidechain pump, applied after compression so the compressor's own
+        # 7. Sidechain pump, applied after compression so the compressor's own
         #    release does not fight the ducking curve.
         if self.duck > 0 and duck_env is not None:
             env = 1.0 - self.duck * (1.0 - duck_env)
             y = y * env[:, None]
 
-        # 7. Stereo placement
+        # 8. Stereo placement
         if self.width != 1.0:
             y = S.width(y, self.width)
         if self.mono_below:
@@ -142,16 +150,25 @@ class Mixer:
         self.buses[name] = dict(ir=ir, gain_db=gain_db, eq=eq or [],
                                 width=width, duck=duck)
 
-    def render(self, duck_env=None, verbose=True):
-        """Sum channels, run the sends, and return the pre-master mix."""
+    def render(self, duck_env=None, verbose=True, keep_stems=False):
+        """Sum channels, run the sends, and return the pre-master mix.
+
+        With `keep_stems` the processed output of every channel and bus is
+        retained in `self.stems`. Diagnosing a spectral problem in the sum
+        is guesswork; diagnosing it per channel is measurement.
+        """
         mix = np.zeros((self.n, 2))
         send_bufs = {k: np.zeros((self.n, 2)) for k in self.buses}
+        if keep_stems:
+            self.stems = {}
 
         for name, ch in self.channels.items():
             y = ch.process(duck_env)
             if not np.any(y):
                 continue
             mix += y
+            if keep_stems:
+                self.stems[name] = y.copy()
             for bus_name, level in ch.sends.items():
                 if bus_name in send_bufs and level > 0:
                     send_bufs[bus_name] += y * level
@@ -175,6 +192,8 @@ class Mixer:
                 wet = wet * (1.0 - cfg["duck"] * (1.0 - duck_env))[:, None]
             wet = wet * db(cfg["gain_db"])
             self.bus_returns[bus_name] = wet
+            if keep_stems:
+                self.stems[f"[{bus_name}]"] = wet.copy()
             mix += wet
             if verbose:
                 pk = 20 * np.log10(max(float(np.max(np.abs(wet))), 1e-9))
@@ -216,11 +235,21 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
 
     y = F.chain(
         y,
-        F.lowshelf(80.0, -0.5, 0.8, sr),       # the mix is already bass-forward
-        F.peaking(250.0, -1.6, 0.9, sr),       # keep the low-mids uncluttered
-        F.peaking(2400.0, 1.5, 0.8, sr),       # lower presence
-        F.peaking(4000.0, 3.2, 0.7, sr),       # presence -- the 2-6k cliff
-        F.highshelf(8500.0, 4.0, 0.7, sr),     # air
+        F.lowshelf(80.0, -0.9, 0.8, sr),       # the mix is already bass-forward
+        # 250 Hz used to be cut 1.6 dB to "keep the low-mids uncluttered".
+        # Measurement said the opposite: 160-400 Hz was already 7 dB below a
+        # pink reference, so the cut was deepening a hole rather than clearing
+        # mud. The boxiness it was aimed at actually sat an octave up, where
+        # four melodic voices all peaked at once.
+        F.peaking(250.0, -0.6, 0.9, sr),
+        F.peaking(540.0, -1.2, 1.1, sr),       # the shared pile-up
+        F.peaking(2400.0, 1.2, 0.8, sr),
+        # 4 kHz and above used to be pushed +3.2 and +4.0 dB. With nothing but
+        # noise percussion living up there, that was amplifying hiss to chase a
+        # presence the source never had. The channel exciters now generate real
+        # harmonics instead, so the master only has to tilt, not rescue.
+        F.peaking(4000.0, 1.6, 0.7, sr),
+        F.highshelf(9000.0, 2.4, 0.7, sr),     # air
     )
 
     before = float(np.max(np.abs(y)))

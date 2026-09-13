@@ -102,8 +102,8 @@ def build_filter_curve(clock, n, sr=SR):
 # track has no arc -- measured loudness range collapses to under 3 LU, which
 # is what "loud but boring" sounds like on a meter.
 SECTION_GAIN = {
-    "intro": 0.72, "build1": 0.85, "drop1": 1.00, "break": 0.66,
-    "build2": 0.88, "drop2": 1.00, "outro": 0.82,
+    "intro": 0.68, "build1": 0.84, "drop1": 1.00, "break": 0.61,
+    "build2": 0.88, "drop2": 1.00, "outro": 0.78,
 }
 
 
@@ -349,7 +349,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                     pos = place("stab", bar, step, jitter=0)
                     st = I.stab([midi_to_hz(m) for m in chord.voicing],
                                 clock.dur(3) / sr + 0.18, sr,
-                                cutoff=2600.0 + 2400.0 * sec.energy,
+                                cutoff=2900.0 + 3100.0 * sec.energy,
                                 decay=0.20, detune=11.0,
                                 seed=97 + bar * 5 + step)
                     mx.channels["stab"].add(st * vel * 0.9, pos)
@@ -358,9 +358,20 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
             if part_state(sec, "pad", lb) and bar % C.CHORD_BARS == 0:
                 dur = C.CHORD_BARS * clock.bar + 1.1
                 p = I.pad([midi_to_hz(m) for m in chord.voicing], dur, sr,
-                          cutoff=900.0 + 1400.0 * sec.energy,
+                          cutoff=1250.0 + 2050.0 * sec.energy,
                           attack=0.8, release=1.3, seed=101 + bar)
                 mx.channels["pad"].add(p, clock.at(bar) - int(0.05 * sr))
+                # Air voice: the top note doubled an octave up, quiet. The
+                # close voicings all sit inside one octave around middle C,
+                # which is warm but leaves 1-3 kHz with no *musical* content.
+                # One high voice fills that band with something harmonic
+                # instead of leaving it to the hats.
+                top = I.pad([midi_to_hz(chord.voicing[-1] + 12)], dur, sr,
+                            cutoff=2200.0 + 2600.0 * sec.energy, voices=5,
+                            detune=12.0, attack=1.1, release=1.5,
+                            seed=103 + bar)
+                mx.channels["pad"].add(top * (0.26 + 0.16 * sec.energy),
+                                       clock.at(bar) - int(0.05 * sr))
 
             # ---------------- breakdown keys ------------------------------
             if part_state(sec, "keys", lb) and lb % 2 == 0:
@@ -413,6 +424,23 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
                                        decay=dur * 0.55, cutoff=3600.0,
                                        seed=131 + mstep)
                     mx.channels["melody"].add(tone * 0.85, pos)
+
+            # ---------------- counter-melody ------------------------------
+            if part_state(sec, "counter", lb):
+                cycle_start = (bar // 8) * 8
+                for mstep, note, mlen in C.COUNTER:
+                    mbar = cycle_start + mstep // 16
+                    if mbar != bar:
+                        continue
+                    step = mstep % 16
+                    if muted(step):
+                        continue
+                    pos = place("counter", bar, step, jitter=0)
+                    dur = clock.dur(mlen) / sr + 0.30
+                    tone = I.pluck(midi_to_hz(note), dur, sr,
+                                   decay=dur * 0.6, cutoff=5200.0,
+                                   seed=139 + mstep)
+                    mx.channels["counter"].add(tone * 0.80, pos)
 
             # ---------------- snare roll ----------------------------------
             if part_state(sec, "snare_roll", lb) and lb >= sec.length - 4:
@@ -561,8 +589,10 @@ def build_mixer(n, sr, fcurve):
     mx.channel("bass", gain_db=-9.5, pan=0.0, duck=0.78, mono_below=140.0,
                hp=28.0,
                eq=[F.peaking(95.0, 0.8, 1.0, sr),
-                   F.peaking(280.0, -3.0, 1.0, sr),
-                   F.peaking(1200.0, 1.2, 0.9, sr)],
+                   F.peaking(280.0, -2.0, 1.0, sr),
+                   F.peaking(1200.0, 1.4, 0.9, sr)],
+               excite=dict(band=(700.0, 2600.0), keep_above=2200.0,
+                           drive=2.6, mix=0.22, mode="tube"),
                comp=dict(threshold=-20.0, ratio=3.5, attack=0.006,
                          release=0.085, knee=5.0, makeup=3.0),
                filter_curve=fcurve)
@@ -583,40 +613,61 @@ def build_mixer(n, sr, fcurve):
     mx.channel("shaker", gain_db=-18.0, pan=0.40, width=1.1, hp=2500.0,
                sends={"room": 0.10}, filter_curve=fcurve)
 
-    mx.channel("rim", gain_db=-18.5, pan=-0.44, hp=300.0,
+    mx.channel("rim", gain_db=-18.5, pan=-0.44, hp=430.0,
                sends={"room": 0.22, "delay": 0.12}, filter_curve=fcurve)
 
-    mx.channel("stab", gain_db=-10.5, width=1.30, duck=0.62, hp=170.0,
-               eq=[F.peaking(430.0, -3.2, 1.0, sr),
-                   F.peaking(5200.0, 3.0, 0.9, sr)],
+    mx.channel("stab", gain_db=-10.2, width=1.30, duck=0.62, hp=170.0,
+               eq=[F.peaking(430.0, -1.7, 1.0, sr)],
+               excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
+                           drive=3.0, mix=0.40, mode="tube"),
                comp=dict(threshold=-22.0, ratio=2.5, attack=0.008,
                          release=0.130, makeup=2.5),
                sends={"plate": 0.30, "delay": 0.18, "room": 0.08},
                filter_curve=fcurve)
 
-    mx.channel("pad", gain_db=-17.0, width=1.50, duck=0.55, hp=150.0,
-               eq=[F.peaking(330.0, -3.5, 0.9, sr),
+    mx.channel("pad", gain_db=-16.4, width=1.50, duck=0.55, hp=150.0,
+               eq=[F.peaking(330.0, -2.2, 0.9, sr),
                    F.highshelf(9000.0, 1.5, 0.7, sr)],
+               excite=dict(band=(700.0, 2400.0), keep_above=2500.0,
+                           drive=2.6, mix=0.28, mode="tube"),
                sends={"hall": 0.55, "plate": 0.15},
                filter_curve=fcurve)
 
-    mx.channel("keys", gain_db=-15.0, width=1.20, duck=0.35, hp=200.0,
-               eq=[F.peaking(400.0, -2.0, 1.0, sr)],
+    mx.channel("keys", gain_db=-14.6, width=1.20, duck=0.35, hp=200.0,
+               eq=[F.peaking(400.0, -1.0, 1.0, sr)],
+               excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
+                           drive=2.8, mix=0.30, mode="tube"),
                sends={"plate": 0.34, "delay": 0.18, "hall": 0.12},
                filter_curve=fcurve)
 
-    mx.channel("arp", gain_db=-16.5, width=1.25, duck=0.42, hp=420.0,
+    mx.channel("arp", gain_db=-15.2, width=1.25, duck=0.42, hp=680.0,
                eq=[F.highshelf(8000.0, 1.5, 0.7, sr)],
+               excite=dict(band=(1000.0, 3800.0), keep_above=3000.0,
+                           drive=3.2, mix=0.38, mode="tanh"),
                sends={"delay": 0.48, "plate": 0.22},
                filter_curve=fcurve)
 
-    mx.channel("vox", gain_db=-17.5, width=1.18, duck=0.45, hp=220.0,
-               eq=[F.peaking(3000.0, 2.0, 1.0, sr)],
+    mx.channel("vox", gain_db=-16.6, width=1.18, duck=0.45, hp=220.0,
+               eq=[F.peaking(1800.0, 2.2, 1.0, sr)],
+               excite=dict(band=(900.0, 3200.0), keep_above=2700.0,
+                           drive=2.8, mix=0.34, mode="tube"),
                sends={"hall": 0.40, "delay": 0.22, "plate": 0.18},
                filter_curve=fcurve)
 
-    mx.channel("melody", gain_db=-16.0, pan=-0.16, width=1.1, duck=0.35,
-               hp=250.0, sends={"plate": 0.32, "delay": 0.30},
+    mx.channel("melody", gain_db=-15.2, pan=-0.16, width=1.1, duck=0.35,
+               hp=330.0, eq=[F.peaking(1400.0, 1.8, 0.9, sr)],
+               excite=dict(band=(900.0, 3200.0), keep_above=2700.0,
+                           drive=2.8, mix=0.32, mode="tube"),
+               sends={"plate": 0.32, "delay": 0.30},
+               filter_curve=fcurve)
+
+    # Opposite side from the hook (-0.16), higher and drier, so the two
+    # lines read as a conversation rather than a doubling.
+    mx.channel("counter", gain_db=-16.8, pan=0.26, width=1.1, duck=0.35,
+               hp=520.0, eq=[F.peaking(2600.0, 1.5, 0.9, sr)],
+               excite=dict(band=(1200.0, 4000.0), keep_above=3200.0,
+                           drive=2.8, mix=0.30, mode="tube"),
+               sends={"plate": 0.26, "delay": 0.34},
                filter_curve=fcurve)
 
     mx.channel("fx", gain_db=-14.5, width=1.40, hp=180.0,
@@ -689,7 +740,7 @@ def encode_mp3(wav_path, mp3_path, bitrate="320k"):
 # Main
 # ==========================================================================
 
-def build_track(sr=SR, verbose=True):
+def build_track(sr=SR, verbose=True, keep_stems=False):
     t0 = time.time()
     clock = C.Clock(C.BPM, sr, C.SWING)
     n = clock.bars_to_samples(C.TOTAL_BARS) + int(5.0 * sr)   # room for tails
@@ -717,7 +768,7 @@ def build_track(sr=SR, verbose=True):
     if verbose:
         print(f"[4/5] mixing ({len(mx.channels)} channels, "
               f"{len(kicks)} kick triggers)")
-    mix = mx.render(duck, verbose)
+    mix = mx.render(duck, verbose, keep_stems=keep_stems)
 
     mix *= build_section_gain(clock, n, sr)[:, None]
 
@@ -728,7 +779,7 @@ def build_track(sr=SR, verbose=True):
 
     if verbose:
         print(f"\nrendered in {time.time() - t0:.1f}s")
-    return master, mix, clock
+    return master, mix, clock, mx
 
 
 def main():
@@ -738,7 +789,7 @@ def main():
     args = ap.parse_args()
 
     verbose = not args.quiet
-    master, mix, clock = build_track(SR, verbose)
+    master, mix, clock, _mx = build_track(SR, verbose)
 
     os.makedirs(args.out, exist_ok=True)
     stem = os.path.join(args.out, "midnight_transit")
