@@ -15,6 +15,9 @@ the *same* simulated room is what makes them sound like one performance
 instead of a stack of separate recordings.
 """
 
+import multiprocessing as mp
+import os
+
 import numpy as np
 
 from dsp.core import SR, db, stereo
@@ -26,6 +29,59 @@ from dsp import space as S
 # --------------------------------------------------------------------------
 # Channel strip
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Parallel processing
+# --------------------------------------------------------------------------
+#
+# Channel strips are independent of one another until the sum, and reverb
+# buses are independent of one another until the sum, so both stages are
+# embarrassingly parallel. The buffers are large (a 200 s stereo channel at
+# 48 kHz is ~160 MB) and there are sixteen of them, so instead of pickling
+# them out to workers the mixer is stashed in a module global and the pool is
+# started with fork(): every child inherits the parent's memory copy-on-write
+# and reads its channel for free. Only the processed result crosses back.
+#
+# Each worker also pins BLAS/OpenMP to one thread: the DSP here is
+# element-wise numpy and scipy.signal, which do not benefit from threading,
+# and four processes each spawning four threads would just thrash the cores.
+
+_SHARED = {}
+
+
+def _limit_threads():
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ[var] = "1"
+
+
+def _process_channel(name):
+    mx, duck = _SHARED["mx"], _SHARED["duck"]
+    ch = mx.channels[name]
+    y = ch.process(duck)
+    return name, y, ch.gr_db, ch.peak_in
+
+
+def _process_bus(bus_name):
+    mx, duck = _SHARED["mx"], _SHARED["duck"]
+    cfg = mx.buses[bus_name]
+    src = _SHARED["sends"][bus_name]
+    wet = S.convolve(src, cfg["ir"])
+    for coeffs in cfg["eq"]:
+        wet = F.apply(wet, coeffs)
+    if cfg["width"] != 1.0:
+        wet = S.width(wet, cfg["width"])
+    if cfg["duck"] > 0 and duck is not None:
+        wet = wet * (1.0 - cfg["duck"] * (1.0 - duck))[:, None]
+    return bus_name, wet * db(cfg["gain_db"])
+
+
+def _pool(jobs):
+    """Fork pool sized to the machine, or None when there is nothing to gain."""
+    n = min(jobs, os.cpu_count() or 1)
+    if n <= 1:
+        return None
+    return mp.get_context("fork").Pool(n, initializer=_limit_threads)
+
 
 class Channel:
     """One instrument's signal path from raw buffer to the mix bus."""
@@ -150,54 +206,71 @@ class Mixer:
         self.buses[name] = dict(ir=ir, gain_db=gain_db, eq=eq or [],
                                 width=width, duck=duck)
 
-    def render(self, duck_env=None, verbose=True, keep_stems=False):
+    def render(self, duck_env=None, verbose=True, keep_stems=False,
+               parallel=True):
         """Sum channels, run the sends, and return the pre-master mix.
 
         With `keep_stems` the processed output of every channel and bus is
         retained in `self.stems`. Diagnosing a spectral problem in the sum
         is guesswork; diagnosing it per channel is measurement.
+
+        `parallel` runs the channel strips, then the reverb buses, across
+        all cores. Results are identical to the serial path: every strip is
+        a pure function of its own buffer and the shared duck envelope.
         """
         mix = np.zeros((self.n, 2))
         send_bufs = {k: np.zeros((self.n, 2)) for k in self.buses}
         if keep_stems:
             self.stems = {}
 
-        for name, ch in self.channels.items():
-            y = ch.process(duck_env)
-            if not np.any(y):
-                continue
-            mix += y
-            if keep_stems:
-                self.stems[name] = y.copy()
-            for bus_name, level in ch.sends.items():
-                if bus_name in send_bufs and level > 0:
-                    send_bufs[bus_name] += y * level
-            if verbose:
-                pk = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9))
-                print(f"    {name:12s} peak {pk:6.1f} dBFS"
-                      f"{'  GR ' + format(ch.gr_db, '5.1f') + ' dB' if ch.comp else ''}")
+        # -- channel strips ---------------------------------------------
+        names = [nm for nm, ch in self.channels.items() if np.any(ch.buf)]
+        _SHARED.update(mx=self, duck=duck_env)
+        pool = _pool(len(names)) if parallel else None
+        try:
+            if pool is None:
+                results = map(_process_channel, names)
+            else:
+                results = pool.imap(_process_channel, names)
+            for name, y, gr_db, peak_in in results:
+                ch = self.channels[name]
+                ch.gr_db, ch.peak_in = gr_db, peak_in
+                mix += y
+                for bus_name, level in ch.sends.items():
+                    if bus_name in send_bufs and level > 0:
+                        send_bufs[bus_name] += y * level
+                if keep_stems:
+                    self.stems[name] = y
+                if verbose:
+                    pk = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9))
+                    print(f"    {name:12s} peak {pk:6.1f} dBFS"
+                          f"{'  GR ' + format(ch.gr_db, '5.1f') + ' dB' if ch.comp else ''}",
+                          flush=True)
+        finally:
+            if pool is not None:
+                pool.close(); pool.join()
 
-        for bus_name, cfg in self.buses.items():
-            src = send_bufs[bus_name]
-            if not np.any(src):
-                continue
-            wet = S.convolve(src, cfg["ir"])
-            for coeffs in cfg["eq"]:
-                wet = F.apply(wet, coeffs)
-            if cfg["width"] != 1.0:
-                wet = S.width(wet, cfg["width"])
-            # Ducking the reverb returns too keeps the tails from filling the
-            # gaps the sidechain just carved open.
-            if cfg["duck"] > 0 and duck_env is not None:
-                wet = wet * (1.0 - cfg["duck"] * (1.0 - duck_env))[:, None]
-            wet = wet * db(cfg["gain_db"])
-            self.bus_returns[bus_name] = wet
-            if keep_stems:
-                self.stems[f"[{bus_name}]"] = wet.copy()
-            mix += wet
-            if verbose:
-                pk = 20 * np.log10(max(float(np.max(np.abs(wet))), 1e-9))
-                print(f"    [{bus_name:10s}] peak {pk:6.1f} dBFS")
+        # -- effect buses --------------------------------------------------
+        live = [b for b in self.buses if np.any(send_bufs[b])]
+        _SHARED.update(sends=send_bufs)
+        pool = _pool(len(live)) if parallel else None
+        try:
+            if pool is None:
+                results = map(_process_bus, live)
+            else:
+                results = pool.imap(_process_bus, live)
+            for bus_name, wet in results:
+                self.bus_returns[bus_name] = wet
+                if keep_stems:
+                    self.stems[f"[{bus_name}]"] = wet
+                mix += wet
+                if verbose:
+                    pk = 20 * np.log10(max(float(np.max(np.abs(wet))), 1e-9))
+                    print(f"    [{bus_name:10s}] peak {pk:6.1f} dBFS", flush=True)
+        finally:
+            if pool is not None:
+                pool.close(); pool.join()
+            _SHARED.clear()
 
         return mix
 

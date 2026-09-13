@@ -36,20 +36,25 @@ STEPS_PER_BAR = 16
 class Clock:
     """Converts musical position (bar, step) into sample offsets."""
 
-    def __init__(self, bpm=BPM, sr=48_000, swing=SWING):
+    def __init__(self, bpm=BPM, sr=48_000, swing=SWING, origin_bar=0):
         self.bpm = bpm
         self.sr = sr
         self.swing = swing
         self.beat = 60.0 / bpm             # seconds per quarter note
         self.bar = self.beat * 4.0
         self.step = self.beat / 4.0        # seconds per 16th
+        # Bar that lands on sample 0. Non-zero for a partial render: every
+        # position before it comes back negative, and Channel.add() clips
+        # negatives, so events from before the window simply fall away.
+        self.origin_bar = origin_bar
 
     def at(self, bar, step=0.0, swung=False):
         """Sample index of a position. `swung` pushes odd 16ths late."""
         offset = 0.0
         if swung and int(step) % 2 == 1:
             offset = self.swing * self.step
-        return int((bar * self.bar + step * self.step + offset) * self.sr)
+        return int(((bar - self.origin_bar) * self.bar
+                    + step * self.step + offset) * self.sr)
 
     def dur(self, steps):
         """Sample length of a number of 16th notes."""

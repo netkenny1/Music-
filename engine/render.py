@@ -79,7 +79,7 @@ def build_filter_curve(clock, n, sr=SR):
     """
     curve = np.full(n, 20000.0)
     for sec in C.SECTIONS:
-        a = clock.at(sec.start)
+        a = max(0, clock.at(sec.start))
         b = min(clock.at(sec.end), n)
         if b <= a:
             continue
@@ -88,7 +88,8 @@ def build_filter_curve(clock, n, sr=SR):
             curve[a:b] = 20000.0
         else:
             f0, f1 = sweep
-            t = np.linspace(0.0, 1.0, b - a)
+            full_a, full_b = clock.at(sec.start), clock.at(sec.end)
+            t = np.linspace(0.0, 1.0, full_b - full_a)[a - full_a:b - full_a]
             curve[a:b] = f0 * (f1 / f0) ** (t ** 0.85)
     # A short smoothing pass stops the joins between sections from clicking.
     w = int(0.05 * sr)
@@ -111,7 +112,7 @@ def build_section_gain(clock, n, sr=SR):
     """Per-section level envelope, cross-faded so the joins are inaudible."""
     g = np.ones(n)
     for sec in C.SECTIONS:
-        a = clock.at(sec.start)
+        a = max(0, clock.at(sec.start))
         b = min(clock.at(sec.end), n)
         if b > a:
             g[a:b] = SECTION_GAIN.get(sec.name, 1.0)
@@ -155,7 +156,7 @@ def pattern_hits(name, swing_ok=True):
 # Sequencer
 # ==========================================================================
 
-def sequence(mx, clock, cache, sr=SR, verbose=True):
+def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
     """Walk the arrangement and schedule every note into the mixer."""
     rng = np.random.default_rng(2024)
     kick_triggers = []
@@ -192,6 +193,8 @@ def sequence(mx, clock, cache, sr=SR, verbose=True):
 
         for lb in range(sec.length):
             bar = sec.start + lb
+            if bars is not None and not (bars[0] - 2 <= bar < bars[1]):
+                continue
             chord = C.chord_at(bar)
             fills = sec.parts.get("fill_bars", [])
             is_fill = lb in fills
@@ -740,10 +743,24 @@ def encode_mp3(wav_path, mp3_path, bitrate="320k"):
 # Main
 # ==========================================================================
 
-def build_track(sr=SR, verbose=True, keep_stems=False):
+def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
+                parallel=True):
+    """
+    Render the track, or with `bars=(a, b)` just bars a..b-1.
+
+    A partial render is for iterating on a mix: a 24-bar drop takes a
+    fraction of the time of the full 104. It goes through exactly the same
+    sequencer, mixer and master chain, so what you hear in the window is
+    what that window will sound like in the full render -- with two honest
+    caveats. Loudness targeting sees only the window, so the limiter drive
+    can differ by a fraction of a dB; and anything sustaining in from more
+    than two bars before the window is not there.
+    """
     t0 = time.time()
-    clock = C.Clock(C.BPM, sr, C.SWING)
-    n = clock.bars_to_samples(C.TOTAL_BARS) + int(5.0 * sr)   # room for tails
+    origin = 0 if bars is None else bars[0]
+    clock = C.Clock(C.BPM, sr, C.SWING, origin_bar=origin)
+    last = C.TOTAL_BARS if bars is None else bars[1]
+    n = clock.bars_to_samples(last - origin) + int(5.0 * sr)   # room for tails
 
     if verbose:
         print(C.describe())
@@ -758,7 +775,8 @@ def build_track(sr=SR, verbose=True, keep_stems=False):
 
     if verbose:
         print("[3/5] sequencing")
-    kicks = sequence(mx, clock, cache, sr, verbose)
+    kicks = sequence(mx, clock, cache, sr, verbose, bars=bars)
+    kicks = [k for k in kicks if k >= 0]
 
     # The pump follows the actual kick events, so it stops automatically
     # wherever the kick drops out.
@@ -768,7 +786,7 @@ def build_track(sr=SR, verbose=True, keep_stems=False):
     if verbose:
         print(f"[4/5] mixing ({len(mx.channels)} channels, "
               f"{len(kicks)} kick triggers)")
-    mix = mx.render(duck, verbose, keep_stems=keep_stems)
+    mix = mx.render(duck, verbose, keep_stems=keep_stems, parallel=parallel)
 
     mix *= build_section_gain(clock, n, sr)[:, None]
 
@@ -786,13 +804,24 @@ def main():
     ap = argparse.ArgumentParser(description="Render the house track.")
     ap.add_argument("--out", default="output", help="output directory")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--bars", default=None, metavar="A-B",
+                    help="render only bars A..B-1, e.g. 64-88 for the main drop")
+    ap.add_argument("--serial", action="store_true",
+                    help="single-process mixing (for timing comparisons)")
     args = ap.parse_args()
 
     verbose = not args.quiet
-    master, mix, clock, _mx = build_track(SR, verbose)
+    bars = None
+    if args.bars:
+        a, b = (int(v) for v in args.bars.split("-"))
+        bars = (a, b)
+    master, mix, clock, _mx = build_track(SR, verbose, bars=bars,
+                                          parallel=not args.serial)
 
     os.makedirs(args.out, exist_ok=True)
     stem = os.path.join(args.out, "midnight_transit")
+    if bars:
+        stem += f"_bars{bars[0]}-{bars[1]}"      # never overwrite the master
 
     outputs = []
     outputs.append(write_wav(f"{stem}_master_24bit_48k.wav", master, SR, 24))
