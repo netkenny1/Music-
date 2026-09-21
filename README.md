@@ -34,7 +34,7 @@ the master. Two honest caveats: loudness targeting only sees the window, so the
 limiter drive can differ by a fraction of a dB, and anything that started
 sustaining more than two bars before the window is not there.
 
-Mixing runs the twelve channel strips, then the four reverb buses, across
+Mixing runs the thirteen channel strips, then the four reverb buses, across
 every core by default. The strips are independent until the sum, so the
 parallel result is bit-identical to the serial one, not merely close --
 verified with `np.array_equal` on the master output.

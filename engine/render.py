@@ -297,10 +297,11 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         place("shaker", bar, step, jitter=1.8))
 
             # ---------------- bass ----------------------------------------
-            if part_state(sec, "bass", lb):
-                name = "bass"
+            bp = part_state(sec, "bass", lb)
+            if bp:
+                name = bp if isinstance(bp, str) else "bass"
                 if sec.parts.get("bounce_second_half") and (lb % 8) >= 4:
-                    name = "bass_bounce"
+                    name = "bass_bounce2"
                 hits = list(pattern_hits(name))
                 last_of_chord = (bar % C.CHORD_BARS) == C.CHORD_BARS - 1
                 for k, (step, vel) in enumerate(hits):
@@ -311,7 +312,10 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # overlap is what the sidechain pumps -- a bass that only
                     # plays between kicks has nothing for the duck to shape.
                     nxt_step = hits[k + 1][0] if k + 1 < len(hits) else 16 + hits[0][0]
-                    octave = name == "bass_bounce" and step == 8
+                    # the octave hits: the 16th after beat 3 in the bounce,
+                    # the 16th before beats 2 and 4 in the double bounce
+                    octave = ((name == "bass_bounce" and step == 8) or
+                              (name == "bass_bounce2" and step in (5, 13)))
                     note = chord.bass + (12 if octave else 0)
                     if step == 14 and last_of_chord and not octave:
                         note = C.approach_note(bar)
@@ -319,11 +323,16 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         dur = clock.dur(1) / sr + 0.04
                     else:
                         dur = clock.dur(nxt_step - step) / sr + 0.04
+                    # Deep: the saws sit low (cutoff 260-480 Hz) with the
+                    # filter envelope giving each note a rounded "boing" of
+                    # an attack, over a full-level sine. The octave hits
+                    # open the filter further so they pop out of the line.
                     b = I.bass(midi_to_hz(note), dur, sr,
-                               cutoff=300.0 + 260.0 * e, res=1.6,
-                               env_amount=2.2, decay=0.08,
-                               saw_level=0.40 + 0.20 * e,
-                               drive=1.5 + 0.3 * e,
+                               cutoff=(260.0 + 220.0 * e) * (1.6 if octave else 1.0),
+                               res=1.9, env_amount=2.6, decay=0.10,
+                               sub=1.0 if not octave else 0.6,
+                               saw_level=0.42 + 0.18 * e,
+                               drive=1.6 + 0.3 * e,
                                seed=83 + bar * 3 + step)
                     pos = place("bass", bar, step, swung=False, jitter=0)
                     mx.channels["bass"].add(b * vel, pos)
@@ -331,7 +340,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # chest-level weight a filtered saw cannot give
                     if sec.parts.get("sub_layer") and not octave:
                         mx.channels["sub"].add(
-                            I.sub_note(midi_to_hz(note), dur, sr) * vel * 0.6, pos)
+                            I.sub_note(midi_to_hz(note), dur, sr) * vel * 0.8, pos)
 
             # ---------------- chord stab riff -----------------------------
             if part_state(sec, "stab", lb) and not thin:
@@ -363,6 +372,18 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                                            release=1.1, seed=101 + v * 11),
                            variants=2)
                 mx.channels["pad"].add(p, clock.at(bar) - int(0.03 * sr))
+                # Air: the top voice doubled an octave up, quiet. The close
+                # voicings sit inside one octave around middle C; one high
+                # voice is what makes the bed sound rich rather than thick.
+                tcut = round(2000.0 + 2400.0 * e)
+                top = pooled("padair", (chord.voicing[-1], tcut),
+                             lambda v: I.pad([midi_to_hz(chord.voicing[-1] + 12)],
+                                             dur, sr, cutoff=tcut, voices=5,
+                                             detune=12.0, attack=0.9,
+                                             release=1.3, seed=103 + v * 11),
+                             variants=2)
+                mx.channels["pad"].add(top * (0.28 + 0.18 * e),
+                                       clock.at(bar) - int(0.03 * sr))
 
             # ---------------- breakdown electric piano --------------------
             if part_state(sec, "keys_chords", lb):
@@ -422,8 +443,11 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     rc = I.reverse_crash(1.9, sr)
                     mx.channels["fx"].add(rc * 0.5, clock.at(bar + 1) - len(rc))
 
+            # The sub drop lives on its own unducked channel: on the sub
+            # channel the kick's sidechain would swallow the very impact it
+            # is meant to reinforce.
             if part_state(sec, "sub_drop", lb) and lb == 0:
-                mx.channels["sub"].add(I.sub_drop(1.5, sr) * 0.75, clock.at(bar))
+                mx.channels["impact"].add(I.sub_drop(1.5, sr) * 0.8, clock.at(bar))
 
             if part_state(sec, "riser", lb) and lb == sec.length - 8:
                 dur = 8 * clock.bar
@@ -456,7 +480,7 @@ def build_mixer(n, sr, fcurve):
     """
     Create every channel with its frequency slot, stereo position and depth.
 
-    Twelve channels. Low end and backbeat dead centre; the top of the kit and
+    Thirteen channels. Low end and backbeat dead centre; the top of the kit and
     the chords fanned out. Everything tonal except the bass is sidechained
     to the kick -- the pad and bass hard, so the whole harmonic bed pumps
     in time, which is the physical sensation of house.
@@ -497,8 +521,11 @@ def build_mixer(n, sr, fcurve):
 
     # The sub is sidechained too: it holds through the kick like the bass,
     # and two things at 45-90 Hz at once is mud, not weight.
-    mx.channel("sub", gain_db=-16.0, pan=0.0, mono_below=200.0,
+    mx.channel("sub", gain_db=-14.5, pan=0.0, mono_below=200.0,
                hp=26.0, lp=140.0, duck=0.92)
+
+    mx.channel("impact", gain_db=-13.0, pan=0.0, mono_below=200.0,
+               hp=26.0, lp=160.0)
 
     mx.channel("bass", gain_db=-9.5, pan=0.0, duck=0.92, mono_below=140.0,
                hp=28.0,

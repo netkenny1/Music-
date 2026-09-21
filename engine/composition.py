@@ -179,12 +179,17 @@ P = {
     # Shaker on the 16ths, accents with the open hat. Air, not a part.
     "shaker":      "o.xo.oxo.oxo.oxo",
 
-    # Bass on the off-beat 8ths, a 16th pickup into the next bar. Each note
-    # is legato into the next, so it holds through the kick and pumps.
+    # Bass on the off-beat 8ths. Each note is legato into the next, so it
+    # holds through the kick and pumps. Intro and outro only.
     "bass":        "..x...x...x...x.",
-    # Second half of each 8: the octave bounces on the 16th after beat 3,
-    # which is the "bouncing" house bassline.
+    # The bouncing bassline: the off-beats plus an octave-up 16th after
+    # beat 3. The octave hit is short and bright; the ear reads root-octave
+    # as a bounce because the register jumps and lands again.
     "bass_bounce": "..x...x.x.x...x.",
+    # Second half of every 8: two bounces, on the 16th before beats 2 and 4,
+    # so each half-bar goes root - octave - root. Busier, still all off the
+    # beat, never on the kick.
+    "bass_bounce2": "..x..xx...x..xx.",
 
     # The chord riff, two bars. Bar one is plain off-beats; bar two pulls
     # the third hit a 16th early and drops the last one, so every two bars
@@ -249,14 +254,14 @@ def build_sections():
     add("intro", 32, 0.45,
         kick=True, hat="hat_8ths", hat_from=0,
         hat16_from=8, ohat_from=8, clap_from=8, shaker_from=16,
-        bass_from=16, stab_from=24, sub_layer=True,
+        bass_from=16, stab_from=24, pad_from=24, sub_layer=True,
         filter_sweep=(2200, 20000), crash_at=[0, 16])
 
     # --- 32 bars: the groove. Everything in, the pad from bar 8, the vocal
     # hook from bar 16. Fills at 7, 15, 23, 31. ----------------------------
     add("main_a", 32, 0.85,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True,
-        bass=True, sub_layer=True, stab=True, pad_from=8, vox_from=16,
+        bass="bass_bounce", sub_layer=True, stab=True, pad_from=8, vox_from=16,
         crash_at=[0, 16], bounce_second_half=True)
 
     # --- 16 bars: breakdown. Drums out. Pad, electric piano, the vocal. --
@@ -279,7 +284,7 @@ def build_sections():
     # --- 32 bars: THE DROP. Full groove, bounce bass, crash, sub drop. ----
     add("drop", 32, 1.00,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True,
-        bass=True, sub_layer=True, stab=True, pad=True, vox=True,
+        bass="bass_bounce", sub_layer=True, stab=True, pad=True, vox=True,
         crash_at=[0, 16], sub_drop=True, bounce_second_half=True)
 
     # --- 32 bars: second half of the drop. The electric-piano riff is the
@@ -287,7 +292,7 @@ def build_sections():
     # bass and pad only -- and 24-31 bring it all back for the last run. --
     add("drop_b", 32, 1.00,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True,
-        bass=True, sub_layer=True, stab=True, pad=True, vox=True,
+        bass="bass_bounce", sub_layer=True, stab=True, pad=True, vox=True,
         keys_riff=True, keys_riff_until=16,
         thin_bars=range(16, 24),
         crash_at=[0, 16, 24], bounce_second_half=True)
@@ -372,8 +377,8 @@ def groove_report():
     """
     import groove as G
     kit = G.combine(P["kick"], P["clap"], P["hat"], P["ohat"], accents_only=True)
-    tuned_a = G.combine(P["bass"], P["stab_a"], accents_only=True)
-    tuned_b = G.combine(P["bass_bounce"], P["stab_b"], accents_only=True)
+    tuned_a = G.combine(P["bass_bounce"], P["stab_a"], accents_only=True)
+    tuned_b = G.combine(P["bass_bounce2"], P["stab_b"], accents_only=True)
     return [("kit", kit, G.syncopation(kit)),
             ("bass + stab, bar 1", tuned_a, G.syncopation(tuned_a)),
             ("bass + stab, bar 2", tuned_b, G.syncopation(tuned_b))]
