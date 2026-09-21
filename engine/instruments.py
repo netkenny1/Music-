@@ -275,6 +275,53 @@ def stab(freqs, dur, sr=SR, cutoff=3000.0, res=1.35, decay=0.22,
     return np.stack([fade(out[:, 0], sr), fade(out[:, 1], sr)], axis=-1)
 
 
+def organ(freqs, dur, sr=SR, decay=0.30, sustain=0.30, click=1.0,
+          seed=211):
+    """
+    Drawbar organ stab -- the house chord sound.
+
+    A tonewheel organ is additive: each drawbar is a sine at a harmonic of
+    the key, and the registration (which drawbars are out) *is* the tone.
+    This one is the classic 888000000-ish house setting: strong sub-octave,
+    fundamental, fifth and octave, with a little 2nd/3rd harmonic
+    "percussion" on the attack, which is the click that lets an organ chord
+    cut through a kick. Sines have no upper harmonics to fight the hats,
+    which is why organ stabs sit in a house mix where saw chords smear.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / sr
+    # (harmonic ratio, level): 16', 8', 5-1/3', 4', 2-2/3', 2', 1-3/5', 1'
+    drawbars = [(0.5, 0.30), (1.0, 1.00), (1.5, 0.40), (2.0, 0.70),
+                (3.0, 0.30), (4.0, 0.40), (5.0, 0.12), (6.0, 0.16), (8.0, 0.10)]
+    # slow vibrato, like a Leslie on chorale: 6 Hz, a few cents
+    vib = 1.0 + 0.0025 * np.sin(2 * np.pi * 6.1 * t + rng.random() * 6.28)
+
+    left = np.zeros(n)
+    right = np.zeros(n)
+    for i, f in enumerate(freqs):
+        tone = np.zeros(n)
+        for ratio, g in drawbars:
+            tone += sine(f * ratio * vib, n, sr, phase0=rng.random()) * g
+        perc = (sine(f * 2.0, n, sr) * 0.5 + sine(f * 3.0, n, sr) * 0.5) * \
+            perc_env(n, sr, 0.0008, 0.075, 4.0) * click
+        v = tone + perc * 0.8
+        # each note leans to its own side, low notes centre, high notes wider
+        p = (-0.5 + i / max(1, len(freqs) - 1)) * 0.5
+        left += v * np.cos((p + 1) * np.pi / 4)
+        right += v * np.sin((p + 1) * np.pi / 4)
+    g = 1.0 / np.sqrt(len(freqs) * 2.5)
+    amp = adsr(n, sr, a=0.003, d=decay, s=sustain, r=min(0.12, dur * 0.3), curve=2.4)
+    out = stereo(left * g * amp, right * g * amp)
+    # key click: a couple of milliseconds of filtered noise
+    clk = F.bandlimit(noise(n, seed=seed + 1), 2500.0, 8000.0, sr) * \
+        perc_env(n, sr, 0.0003, 0.004, 8.0) * 0.25 * click
+    out = out + clk[:, None]
+    out = D.saturate(out, 1.4, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(150.0, 0.707, sr))
+    return np.stack([fade(out[:, 0], sr), fade(out[:, 1], sr)], axis=-1)
+
+
 def pad(freqs, dur, sr=SR, cutoff=1500.0, attack=0.9, release=1.4,
         detune=16.0, voices=7, seed=101, sub_level=0.0):
     """

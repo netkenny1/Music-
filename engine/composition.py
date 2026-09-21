@@ -1,31 +1,58 @@
 """
 The composition: tempo, key, harmony, rhythm patterns and song structure.
 
-Musical decisions
------------------
-**124 BPM.** Squarely in the house pocket. Fast enough to drive, slow enough
-that the offbeat hi-hat has room to breathe. It is also an easy tempo for a DJ
-to beatmatch into 122-128 BPM sets.
+What changed, and why
+---------------------
+The previous arrangement was *busy*: a 16th-note background texture,
+tambourine, congas, bells, a counter-melody, hat patterns rotating every two
+bars, stutters, mini-drops, pushed claps, a polyrhythm. Everything a
+production-music library track does to hold attention for thirty seconds.
+That is exactly what made it sound like an advert.
 
-**F minor.** Warm and slightly melancholy, the default emotional register of
-deep and melodic house. The root at F2 (87.3 Hz) puts the bass fundamental
-right where club subwoofers are most efficient.
+A club record does the opposite. It is an 8-bar loop played for six minutes,
+with maybe seven parts, and the interest comes from *phrasing*: what enters
+and leaves on the 8-, 16- and 32-bar boundaries, the fill that announces
+each boundary, the one breakdown, the one build. The listener is meant to
+lock in, not be entertained. So this file now describes that:
+
+* **The kit.** Kick on every quarter. Clap on 2 and 4. Closed hats on the
+  16ths with the swung off-16ths as ghost notes. Open hat on every off-beat
+  8th -- the single most identifying sound in house. A shaker for air.
+  Nothing else on the top.
+* **The bass.** Off-beat 8ths, legato, so each note holds through the next
+  kick and gets pumped by the sidechain. Root of the chord, a fifth-approach
+  into each chord change.
+* **The chords.** One stab riff, two bars long, one chord per two bars.
+  One pad under it, sidechained hard, so the chords breathe with the kick.
+* **The phrasing.** 32-bar DJ intro, 32 bars of groove, 16-bar breakdown,
+  16-bar build, 64 bars of drop in two halves, 32-bar DJ outro. Every
+  8th bar ends with a small fill, every 16th with a bigger one, every 32nd
+  with a crash. That grid is the form of the genre.
+
+Musical decisions kept from before
+----------------------------------
+**124 BPM.** Squarely in the house pocket, easy to beatmatch into a
+122-128 set.
+
+**F minor.** Warm and slightly melancholy. The root at F2 (87.3 Hz) puts the
+bass fundamental where club subwoofers are most efficient.
 
 **i - VI - III - VII** (Fm9 - Dbmaj7 - Abmaj7 - Ebadd9). Every chord is
-diatonic and shares at least two notes with its neighbour, so the voicings can
-move by step instead of leaping. That smooth voice leading is why the
-progression feels like it circles rather than restarts.
+diatonic and shares two notes with its neighbour, so the voicings move by
+step. The VII (Eb) has no leading tone to F, which is why the loop circles
+instead of cadencing: a house progression is meant to feel endless.
 
-**Swing on the 16ths, not the 8ths.** The kick and bass stay dead on the grid
-so the track beatmatches cleanly; only the hats, shaker and stabs are nudged
-late. That is the difference between a groove and a tempo drift.
+**Swing on the 16ths, not the 8ths.** Kick and bass are dead on the grid so
+the track beatmatches; only the odd 16ths (hat ghosts, shaker) are pushed
+late. 14 % of a 16th is a 57 % MPC swing -- the house shuffle, not a
+triplet feel.
 """
 
 from dataclasses import dataclass, field
 
 BPM = 124.0
 KEY_NAME = "F minor"
-SWING = 0.19          # fraction of a 16th that odd steps are pushed late
+SWING = 0.14          # fraction of a 16th that odd steps are pushed late
 STEPS_PER_BAR = 16
 
 
@@ -73,7 +100,7 @@ class Chord:
     name: str
     bass: int          # MIDI note for the bassline root
     voicing: list      # MIDI notes for chords/pads (close voicing, ~G3-G4)
-    arp: list          # MIDI notes used by the arpeggio, an octave up
+    top: int           # MIDI note the vocal hook sings over this chord
 
 
 # Voice leading across the four chords (top voice: G4 -> F4 -> G4 -> Bb4):
@@ -83,13 +110,14 @@ class Chord:
 #   67 -> 65 -> 67 -> 70     (G4   F4   G4   Bb4)
 # Every voice moves by a tone or less, or not at all.
 PROGRESSION = [
-    Chord("Fm9",     bass=41, voicing=[56, 60, 63, 67], arp=[68, 72, 75, 79]),
-    Chord("Dbmaj7",  bass=37, voicing=[56, 60, 61, 65], arp=[68, 72, 73, 77]),
-    Chord("Abmaj7",  bass=44, voicing=[55, 60, 63, 67], arp=[67, 72, 75, 79]),
-    Chord("Ebadd9",  bass=39, voicing=[58, 63, 65, 70], arp=[70, 75, 77, 82]),
+    Chord("Fm9",     bass=41, voicing=[56, 60, 63, 67], top=72),   # C5
+    Chord("Dbmaj7",  bass=37, voicing=[56, 60, 61, 65], top=72),   # C5
+    Chord("Abmaj7",  bass=44, voicing=[55, 60, 63, 67], top=75),   # Eb5
+    Chord("Ebadd9",  bass=39, voicing=[58, 63, 65, 70], top=77),   # F5
 ]
 
 CHORD_BARS = 2        # each chord lasts two bars, so the cycle is 8 bars
+BASS_LOW, BASS_HIGH = 34, 46     # Bb1 .. Bb2: where a house bass lives
 
 
 def chord_at(bar):
@@ -97,112 +125,82 @@ def chord_at(bar):
     return PROGRESSION[(bar // CHORD_BARS) % len(PROGRESSION)]
 
 
+def approach_note(bar):
+    """
+    The bass note that leads into the next chord.
+
+    The last off-beat before a chord change plays the *fifth of the chord
+    that is coming*, kept inside the bass register. Fifth-to-root is the
+    strongest pull in tonal music (it is what a dominant does), and disco and
+    house basslines have used it as their standard turnaround for fifty
+    years: the ear hears the fifth, expects the root, and the new chord
+    lands on the downbeat as the answer.
+    """
+    nxt = chord_at(bar + 1)
+    fifth = nxt.bass + 7
+    if fifth > BASS_HIGH:
+        fifth -= 12
+    return fifth
+
+
 # --------------------------------------------------------------------------
 # Rhythm patterns
 # --------------------------------------------------------------------------
 # 16 characters = one bar of 16th notes.
 #   '.' rest      'x' normal      'X' accent      'o' ghost/soft
-VELOCITY = {"x": 1.00, "X": 1.15, "o": 0.55, ".": 0.0}
+VELOCITY = {"x": 1.00, "X": 1.15, "o": 0.50, ".": 0.0}
 
 P = {
-    # Four-on-the-floor. The foundation of the entire genre: a kick on every
-    # quarter note gives dancers an unmissable pulse to lock to.
+    # Four-on-the-floor. A kick on every quarter note is the entire genre.
     "kick":        "X...x...x...x...",
-    "kick_fill":   "X...x...x...x.xx",
+    # Beat 4 removed: the fill at the end of a 16-bar phrase. The pulse is
+    # so well established by then that the missing kick is a *gesture*,
+    # a breath before the next phrase lands.
+    "kick_drop4":  "X...x...x.......",
+    # Doubled to 8ths for the last two bars of the build.
+    "kick_8ths":   "x.x.x.x.x.x.x.x.",
 
     # Backbeat on 2 and 4.
     "clap":        "....X.......X...",
-    "clap_ghost":  "....X.....o.X...",
 
-    # Closed hats on every 16th with velocity accents. The alternation of
-    # loud and soft is what makes a straight 16th line feel human.
-    "hat":         "oXooxXoooXooxXoo",
-    "hat_sparse":  "..x...x...x...x.",
+    # Closed hats. Per beat: accent on the kick, a swung ghost, NOTHING on
+    # the off-8th (the open hat lives there -- a hi-hat cannot be open and
+    # closed at once, so the closed hat is choked out of that slot), then
+    # another ghost. The ghosts are what the swing acts on; this is the
+    # house shuffle.
+    "hat":         "Xo.oXo.oXo.oXo.o",
+    # Intro hats: straight 8ths, no ghosts, before the groove is revealed.
+    "hat_8ths":    "x...x...x...x...",
 
-    # The signature house open hat: dead on the offbeat 8ths, filling the
-    # space between kicks. This one pattern is most of the genre's identity.
+    # THE open hat: dead on the off-beat 8ths, in the space between kicks.
+    # Kick-and-open-hat is the pendulum every house record swings on.
     "ohat":        "..x...x...x...x.",
 
-    "shaker":      "o.xo.xo.o.xo.xo.",
+    # Shaker on the 16ths, accents with the open hat. Air, not a part.
+    "shaker":      "o.xo.oxo.oxo.oxo",
 
-    # Bass sits in the gaps between kicks, with a 16th pickup into the bar.
-    "bass":        "..x...x...x...xx",
-    "bass_busy":   "..xx..x.x.x...xx",
-    "bass_simple": "..x...x...x...x.",
+    # Bass on the off-beat 8ths, a 16th pickup into the next bar. Each note
+    # is legato into the next, so it holds through the kick and pumps.
+    "bass":        "..x...x...x...x.",
+    # Second half of each 8: the octave bounces on the 16th after beat 3,
+    # which is the "bouncing" house bassline.
+    "bass_bounce": "..x...x.x.x...x.",
 
-    # Offbeat chord stabs -- the same rhythmic role as the open hat, an
-    # octave-and-a-half higher in the frequency range.
-    "stab":        "..x...x...x...x.",
-    "stab_synco":  "..x..x..x.x...x.",
+    # The chord riff, two bars. Bar one is plain off-beats; bar two pulls
+    # the third hit a 16th early and drops the last one, so every two bars
+    # there is one small syncopation that resolves on the next downbeat.
+    "stab_a":      "..X...x...X...x.",
+    "stab_b":      "..X...x.x...X...",
 
-    "rim":         "......x.......o.",
+    # Electric piano riff for the second half of the drop: the "x..x..x."
+    # tresillo, the Afro-Cuban cell that Chicago house borrowed from disco.
+    "keys":        "x..x..x.........",
 
-    # --- patterns built to syncopate -------------------------------------
-    # The originals articulate every strong beat, which measures as zero
-    # syncopation no matter how busy they look. These deliberately leave
-    # quarter-note positions empty so earlier notes hold through them.
-
-    # Kick with beat 3 missing. The pulse is established well enough by then
-    # that the ear supplies the absent hit -- and feels its absence.
-    "kick_hole3":  "X...x.......x...",
-    # Kick with the DOWNBEAT missing. Only usable once, deep into a drop.
-    "kick_hole1":  "....x...x...x...",
-
-    # Thinner hats: accents on the offbeats only, so the quarter notes are
-    # left to the kick rather than being doubled.
-    "hat_thin":    "..X...X...X...X.",
-    "hat_synco":   "o.X..o.X.o..X.o.",
-
-    # Bass landing a 16th BEFORE the beat and holding through it.
-    "bass_ante":   ".x.....x.....x..",
-    "bass_synco":  "..x..x.....x..x.",
-
-    # Chord stab that lands late and holds over the next strong beat.
-    "stab_late":   "...x.....x....x.",
-    # Clap pushed a 16th early -- arrives before the ear expects beat 2/4.
-    "clap_push":   "...x.......x....",
-    "arp":         "x.x.x.x.x.x.x.x.",
-    "arp_dense":   "xxxxxxxxxxxxxxxx",
-
-    # --- bounce and variation ---------------------------------------------
-    # Hat variants rotate every two bars so the top never sits still. The
-    # bounce pattern accents the swung off-16ths; the roll bar leads into
-    # the next phrase.
-    "hat_bounce":  "o.XooX.oo.XooX.o",
-    "hat_roll":    "oXoXoXoXoXoXoXXX",
-    # Bass leaning on the off-8ths with the pickups doubled: the "and" of
-    # every beat is what makes house bounce rather than march.
-    "bass_bounce": "..x.x.x..xx.x.x.",
-    "bass_oct":    "..x..xx...x..xx.",
-    # Tambourine on the off-8ths under the open hat, 16ths for lift bars.
-    "tamb":        "..x...x...x...x.",
-    "tamb_16":     ".o.x.o.x.o.x.o.x",
-    # Two-bar conga conversation: low pattern, then high answers.
-    "conga_a":     "x..x..x...x.x...",
-    "conga_b":     "..x.x..x..x...x.",
-    # Continuous background notes.
-    "texture":     "xxxxxxxxxxxxxxxx",
-
-    # --- reference-driven ---------------------------------------------------
-    # Pulsing octave bass on driving 8ths (root, octave, root, octave): the
-    # disco / synthwave-house engine under "Take My Breath". The sequencer
-    # alternates the octave per hit; the pattern just supplies the pulse.
-    "bass_pulse":  "x.x.x.x.x.x.x.x.",
-    # Vocal chops used as percussion, tech-house style: short syllables on
-    # the off-beats and pickups, never on the downbeat.
-    "vox_rhythm":  "...x..x...x.x..x",
-    "vox_rhythm2": ".x....x..x....x.",
+    # Fills. Clap on beat 4 as 16ths, velocity rising: the 8-bar fill.
+    "fill_8":      "............oxxX",
+    # Beats 3 and 4, 8ths then 16ths: the 16-bar fill.
+    "fill_16":     "........x.x.oxxX",
 }
-
-# Background-note orders, indexed by 8-bar cycle. Each is a permutation of
-# the chord's four arp tones; rotating them is what stops a 16th-note texture
-# from becoming wallpaper.
-TEXTURE_ORDERS = [
-    [0, 1, 2, 3, 2, 1, 0, 1],          # up and back
-    [3, 2, 1, 0, 1, 2, 3, 2],          # down and back
-    [0, 2, 1, 3, 0, 2, 1, 3],          # skipping
-    [0, 3, 1, 2, 3, 0, 2, 1],          # scattered
-]
 
 
 # --------------------------------------------------------------------------
@@ -214,9 +212,8 @@ class Section:
     """
     One block of the song.
 
-    `energy` (0..1) drives automation: master filter opening, reverb amount,
-    and hi-hat brightness all scale with it, so the track breathes across its
-    runtime instead of being uniformly loud.
+    `energy` (0..1) drives automation: master filter opening and hi-hat
+    brightness scale with it, so the track breathes across its runtime.
     """
     name: str
     start: int                 # first bar
@@ -231,11 +228,11 @@ class Section:
 
 def build_sections():
     """
-    Structure, in DJ-friendly 8- and 16-bar blocks.
+    The club edit: 192 bars, 6:11, in 8-, 16- and 32-bar blocks.
 
-    The long beat-only intro and outro are deliberate: a club DJ needs 16 bars
-    of unambiguous kick to align the track against the one already playing,
-    with no melodic content to clash during the blend.
+    Every part enters or leaves on a phrase boundary. That is not a
+    convention for its own sake -- a DJ counts in phrases, and a crowd
+    hears in phrases; an element arriving on bar 13 reads as a mistake.
     """
     S = []
     b = 0
@@ -245,85 +242,62 @@ def build_sections():
         S.append(Section(name, b, length, energy, parts))
         b += length
 
-    # --- 16 bars: DJ intro. Drums only, filtered, gradually opening. -------
-    add("intro", 16, 0.30,
-        kick=True, hat="hat_sparse", shaker=True, rim=True,
-        texture=True, texture_from=4, conga=True, conga_from=8,
-        filter_sweep=(600, 9000), crash_at=[0])
+    # --- 32 bars: DJ intro. One element every 8 bars. ---------------------
+    # Bars 0-7 kick and 8th-note hats. 8-15 the open hat and clap: the
+    # groove is now identifiable as house. 16-23 the bass, dark. 24-31 the
+    # stab riff arrives under a closing-then-opening filter.
+    add("intro", 32, 0.45,
+        kick=True, hat="hat_8ths", hat_from=0,
+        hat16_from=8, ohat_from=8, clap_from=8, shaker_from=16,
+        bass_from=16, stab_from=24, sub_layer=True,
+        filter_sweep=(2200, 20000), crash_at=[0, 16])
 
-    # --- 8 bars: first build. Bass and full hats arrive. -------------------
-    add("build1", 8, 0.55,
-        kick=True, hat="hat", ohat=True, shaker=True, clap="clap",
-        bass="bass_simple", riser=True, filter_sweep=(4000, 18000),
-        texture=True, tamb="tamb", conga=True)
+    # --- 32 bars: the groove. Everything in, the pad from bar 8, the vocal
+    # hook from bar 16. Fills at 7, 15, 23, 31. ----------------------------
+    add("main_a", 32, 0.85,
+        kick=True, hat="hat", ohat=True, clap=True, shaker=True,
+        bass=True, sub_layer=True, stab=True, pad_from=8, vox_from=16,
+        crash_at=[0, 16], bounce_second_half=True)
 
-    # --- 16 bars: drop one. Everything but the ear candy. ------------------
-    add("drop1", 16, 0.90,
-        kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
-        bass="bass", stab="stab", pad=True, rim=True, crash_at=[0, 8],
-        sub_drop=True, sub_layer=True,
-        hat_cycle=["hat", "hat_bounce", "hat", "hat_roll"], hat_cycle_bars=2,
-        bass_cycle=["bass", "bass_pulse"], bass_cycle_bars=8,
-        tamb="tamb", conga=True, texture=True, vox_rhythm=True,
-        # subtle drop: the top pulled for one bar, then everything back
-        mini_drop_bars=[8],
-        # first violations, used sparingly: the groove is still being taught
-        kick_pattern_bars={7: "kick_hole3"},
-        clap_push_bars=[11],
-        stutter_at=[(15, 12, "stab")])
+    # --- 16 bars: breakdown. Drums out. Pad, electric piano, the vocal. --
+    # The kick's absence is the point: sixteen bars of nothing to dance to,
+    # so that its return in the build is felt in the chest.
+    add("break", 16, 0.40,
+        pad=True, keys_chords=True, vox=True, shaker_from=8,
+        downlifter=True, filter_sweep=(900, 16000))
 
-    # --- 16 bars: breakdown. Kick drops out for 8 bars, harmony takes over.
-    add("break", 16, 0.45,
-        kick_from=8, hat_from=12, hat="hat_sparse",
-        pad=True, keys=True, vox=True, melody=True, texture=True,
-        clap_from=12, clap="clap", downlifter=True,
-        conga=True, conga_from=8, tamb="tamb", tamb_from=8,
-        # half-drop: the kick's return at bar 8 lands with a small impact
-        impact_bars=[8],
-        reverse_crash_at=[15], filter_sweep=(1200, 14000))
+    # --- 16 bars: build. Kick back at 0. Bass leaves at 8 (no low end is
+    # the tension). Snare roll over the last 4 bars, riser over the last 8,
+    # kick doubles to 8ths for the last 2, and the last beat is cut. -------
+    add("build", 16, 0.75,
+        kick=True, hat="hat", hat_from=4, ohat_from=8, clap=True,
+        shaker=True, bass_until=8, sub_layer=True, stab=True, pad=True,
+        snare_roll=True, riser=True, kick_8ths_from=14,
+        filter_sweep=(6000, 20000), silence_from=(15, 12),
+        reverse_crash_at=[15])
 
-    # --- 8 bars: second build. Snare roll, riser, everything tightening. ---
-    add("build2", 8, 0.75,
-        kick=True, hat="hat", shaker=True, bass="bass_pulse",
-        pad=True, stab="stab", snare_roll=True, riser=True,
-        clap="clap", filter_sweep=(2500, 18000),
-        texture=True, tamb="tamb_16", conga=True,
-        stutter_at=[(7, 8, "stab")],
-        # total silence on the last beat. The riser stops, everything stops,
-        # and the listener is left holding a prediction with nothing to meet it.
-        silence_from=(7, 12))
+    # --- 32 bars: THE DROP. Full groove, bounce bass, crash, sub drop. ----
+    add("drop", 32, 1.00,
+        kick=True, hat="hat", ohat=True, clap=True, shaker=True,
+        bass=True, sub_layer=True, stab=True, pad=True, vox=True,
+        crash_at=[0, 16], sub_drop=True, bounce_second_half=True)
 
-    # --- 24 bars: main drop. Full arrangement plus arpeggio and vocals. ----
-    add("drop2", 24, 1.00,
-        kick=True, hat="hat", ohat=True, shaker=True, clap="clap_ghost",
-        bass="bass_busy", stab="stab_synco", pad=True, rim=True, keys=True,
-        arp=True, vox=True, melody=True, crash_at=[8, 16],
-        counter=True, counter_from=12,
-        sub_drop=True, sub_layer=True, fill_bars=[7, 15, 23],
-        hat_cycle=["hat", "hat_bounce", "hat_roll", "hat_bounce"], hat_cycle_bars=2,
-        bass_cycle=["bass_pulse", "bass_bounce", "bass_pulse"], bass_cycle_bars=8,
-        tamb="tamb", conga=True, texture=True, bells=True, vox_rhythm=True,
-        # subtle drops at 4 and 20, a loud one at 12 -- so the 24 bars
-        # never run more than 8 without something giving way or landing
-        mini_drop_bars=[4, 20], impact_bars=[12],
-        # THE DELAYED DROP. Bar 0 of the drop is a hole: no kick, no groove,
-        # just a sub and the tail of the build hanging in the air. The kick
-        # then arrives EARLY, on the last 8th of the bar, so the beat both
-        # fails to arrive when expected and then pre-empts the next downbeat.
-        hole_bar=0,
-        kick_pattern_bars={7: "kick_hole3", 15: "kick_hole1", 19: "kick_hole3"},
-        clap_push_bars=[11, 19],
-        bass_ante_bars=[5, 13, 21],
-        stab_late_bars=[9, 17],
-        poly_from=8,
-        stutter_at=[(23, 8, "arp")])
+    # --- 32 bars: second half of the drop. The electric-piano riff is the
+    # new element (0-15). Bars 16-23 thin out -- hats and stabs gone, kick,
+    # bass and pad only -- and 24-31 bring it all back for the last run. --
+    add("drop_b", 32, 1.00,
+        kick=True, hat="hat", ohat=True, clap=True, shaker=True,
+        bass=True, sub_layer=True, stab=True, pad=True, vox=True,
+        keys_riff=True, keys_riff_until=16,
+        thin_bars=range(16, 24),
+        crash_at=[0, 16, 24], bounce_second_half=True)
 
-    # --- 16 bars: DJ outro. Elements peel away, filter closes. -------------
-    add("outro", 16, 0.35,
-        kick=True, kick_until=14, hat="hat", shaker=True,
-        bass="bass_simple", bass_until=8, stab="stab", stab_until=4,
-        clap="clap", clap_until=8, filter_sweep=(16000, 900),
-        texture=True, texture_until=8, tamb="tamb", tamb_until=8)
+    # --- 32 bars: DJ outro. Elements leave every 8, filter closes. --------
+    add("outro", 32, 0.60,
+        kick=True, hat="hat", ohat=True, clap=True, clap_until=24,
+        shaker=True, shaker_until=16, bass=True, bass_until=16,
+        sub_layer=True, stab=True, stab_until=8, pad=True, pad_until=8,
+        ohat_until=24, filter_sweep=(20000, 1400), crash_at=[0])
 
     return S
 
@@ -331,107 +305,40 @@ def build_sections():
 SECTIONS = build_sections()
 TOTAL_BARS = SECTIONS[-1].end
 
+# Sections where the groove is running and the 8/16/32-bar fills apply.
+GROOVE_SECTIONS = {"intro", "main_a", "drop", "drop_b", "outro"}
+
+
+def fill_kind(sec, local_bar):
+    """
+    Which fill, if any, ends this bar.
+
+    The fill lives in the LAST bar of a phrase. Bar 7 of every 8 gets the
+    small clap roll; bar 15 of every 16 the bigger roll with the kick's
+    fourth beat removed; the last bar of a section additionally gets the
+    reverse cymbal into the next downbeat. A listener never counts bars,
+    but they feel the 8s -- and the fill is what tells them where they are.
+    """
+    if sec.name not in GROOVE_SECTIONS:
+        return None
+    if (local_bar + 1) % 16 == 0:
+        return "fill_16"
+    if (local_bar + 1) % 8 == 0:
+        return "fill_8"
+    return None
+
 
 # --------------------------------------------------------------------------
-# The hook
+# The vocal hook
 # --------------------------------------------------------------------------
-# (step within the 8-bar cycle, MIDI note, length in 16ths).
-# Built from the F natural-minor scale and phrased as call-and-response: a
-# rising two-bar question over Fm9/Dbmaj7, answered by a falling one over
-# Abmaj7/Ebadd9.
-MELODY = [
-    (4, 72, 2), (6, 75, 2), (8, 77, 4), (14, 72, 2),          # Fm9
-    (16, 68, 4), (22, 72, 2), (24, 70, 6),
-    (36, 68, 2), (38, 72, 2), (40, 73, 4), (46, 72, 2),       # Dbmaj7
-    (48, 68, 8), (58, 65, 4),
-    (68, 75, 2), (70, 72, 2), (72, 75, 4), (78, 77, 2),       # Abmaj7
-    (80, 75, 6), (88, 72, 4),
-    (100, 70, 2), (102, 72, 2), (104, 75, 4), (110, 77, 2),   # Ebadd9
-    (112, 75, 8), (122, 72, 4),
+# One short phrase per four bars: (bar within the 4, step, vowel, 16ths).
+# Two syllables, off the beat, on the chord's top note. Restraint is the
+# point -- a club vocal is a sample that repeats, not a melody.
+VOX_HOOK = [
+    (2, 2, "ooh", 6),
+    (2, 10, "ah", 4),
+    (3, 6, "ah", 3),
 ]
-
-# Counter-melody: answers the hook in the gaps it leaves. Every note is a
-# chord tone, and each phrase sits a fifth or more above the hook so the two
-# lines never cross. The last phrase falls Bb -> G -> F, landing on the root
-# of the Fm9 that starts the next cycle -- the resolution is what makes the
-# repeat feel earned rather than looped.
-COUNTER = [
-    (26, 79, 2), (28, 80, 2), (30, 77, 4),                    # Fm9   (G Ab F)
-    (60, 80, 2), (62, 77, 2), (64, 73, 4),                    # Dbmaj7 (Ab F Db)
-    (90, 79, 2), (92, 80, 2), (94, 84, 2), (96, 79, 4),       # Abmaj7 (G Ab C G)
-    (114, 82, 2), (116, 79, 2), (118, 77, 6),                 # Ebadd9 (Bb G F)
-]
-
-
-def groove_report():
-    """
-    Measure syncopation, and be honest about what the number means.
-
-    Two surfaces are reported, because they say different things:
-
-    * **Full kit.** In four-to-the-floor house this is near zero by design and
-      that is correct, not a failure. A continuous 16th hat plus a kick on
-      every quarter articulates every metrical position, so nothing is ever
-      left hanging. That saturation is exactly what makes the genre danceable:
-      it is the stable grid the violations are heard against.
-
-    * **Bass and chords.** This is where bar-level syncopation actually lives
-      in house, and it is where the index is worth reading.
-
-    The structural violations -- the delayed drop, a missing downbeat, an
-    accelerating stutter, a bar of silence -- do not show up in either number.
-    They operate across phrases, not within a bar, and they are counted
-    separately below.
-    """
-    import groove as G
-
-    kit, mel = [], []
-    for name, drums, tuned in [
-        ("drop1", ["kick", "clap_ghost", "hat", "ohat"], ["bass", "stab"]),
-        ("drop2", ["kick", "clap_ghost", "hat", "ohat"],
-                  ["bass_busy", "stab_synco"]),
-        ("violation bar", ["kick_hole1", "clap_push", "hat_synco", "ohat"],
-                          ["bass_ante", "stab_late"]),
-    ]:
-        k = G.combine(*[P[x] for x in drums], accents_only=True)
-        m = G.combine(*[P[x] for x in tuned], accents_only=True)
-        kit.append((name, k, G.syncopation(k)))
-        mel.append((name, m, G.syncopation(m)))
-    return kit, mel
-
-
-def violation_report():
-    """Count the structural expectation violations, and where they land."""
-    events = []
-    for sec in SECTIONS:
-        p = sec.parts
-        if p.get("hole_bar") is not None:
-            events.append((sec.start + p["hole_bar"], "delayed drop",
-                           "downbeat withheld; kick enters early on the last 8th"))
-        for lb, pat in p.get("kick_pattern_bars", {}).items():
-            what = ("downbeat kick removed" if pat == "kick_hole1"
-                    else "beat-3 kick removed")
-            events.append((sec.start + lb, "missing kick", what))
-        for lb in p.get("clap_push_bars", []):
-            events.append((sec.start + lb, "pushed clap",
-                           "backbeat arrives a 16th early"))
-        for lb in p.get("bass_ante_bars", []):
-            events.append((sec.start + lb, "anticipated bass",
-                           "bass lands before the beat and holds through it"))
-        for lb in p.get("stab_late_bars", []):
-            events.append((sec.start + lb, "late chord",
-                           "stab lands after the beat"))
-        for (lb, step, part) in p.get("stutter_at", []):
-            events.append((sec.start + lb, "stutter",
-                           f"accelerating {part} retrigger from step {step}"))
-        if p.get("silence_from"):
-            lb, step = p["silence_from"]
-            events.append((sec.start + lb, "silence",
-                           f"everything stops from step {step}"))
-        if p.get("poly_from") is not None:
-            events.append((sec.start + p["poly_from"], "polyrhythm",
-                           "3-against-4 layer, realigns every 3 bars"))
-    return sorted(events)
 
 
 def describe():
@@ -439,7 +346,8 @@ def describe():
     lines = [
         f"Key      : {KEY_NAME}",
         f"Tempo    : {BPM:g} BPM   (bar = {4 * 60 / BPM:.3f}s)",
-        f"Swing    : {SWING * 100:.0f}% on 16ths",
+        f"Swing    : {SWING * 100:.0f}% of a 16th  "
+        f"(MPC {50 + SWING * 50:.0f}%)",
         f"Harmony  : " + " -> ".join(c.name for c in PROGRESSION) +
         f"  ({CHORD_BARS} bars each)",
         f"Length   : {TOTAL_BARS} bars = {TOTAL_BARS * 4 * 60 / BPM:.1f}s",
@@ -453,19 +361,36 @@ def describe():
     return "\n".join(lines)
 
 
+def groove_report():
+    """
+    Longuet-Higgins & Lee syncopation of the loop, for the README.
+
+    The full kit measures near zero -- correct for four-on-the-floor, where
+    every metrical position is articulated. The bass and chords are where
+    the syncopation lives: off-beat 8ths held through the beat score 7 per
+    bar, and the stab riff's early hit in bar two adds to that.
+    """
+    import groove as G
+    kit = G.combine(P["kick"], P["clap"], P["hat"], P["ohat"], accents_only=True)
+    tuned_a = G.combine(P["bass"], P["stab_a"], accents_only=True)
+    tuned_b = G.combine(P["bass_bounce"], P["stab_b"], accents_only=True)
+    return [("kit", kit, G.syncopation(kit)),
+            ("bass + stab, bar 1", tuned_a, G.syncopation(tuned_a)),
+            ("bass + stab, bar 2", tuned_b, G.syncopation(tuned_b))]
+
+
 if __name__ == "__main__":
     print(describe())
     print()
-    kit, mel = groove_report()
-    print("Syncopation, Longuet-Higgins & Lee index of the accent surface:")
-    print("  full kit (saturated by design -- near zero is correct):")
-    for name, surf, idx in kit:
-        print(f"    {name:14s} {surf}  index {idx:3d}")
-    print("  bass + chords (where syncopation lives in house):")
-    for name, surf, idx in mel:
-        print(f"    {name:14s} {surf}  index {idx:3d}")
+    print("Syncopation (Longuet-Higgins & Lee):")
+    for name, surf, idx in groove_report():
+        print(f"  {name:20s} {surf}  index {idx:3d}")
     print()
-    print("Structural expectation violations:")
-    for bar, kind, detail in violation_report():
-        t = bar * 4 * 60 / BPM
-        print(f"  {int(t)//60}:{int(t)%60:02d}  bar {bar:3d}  {kind:18s} {detail}")
+    print("Phrase fills:")
+    for sec in SECTIONS:
+        for lb in range(sec.length):
+            k = fill_kind(sec, lb)
+            if k:
+                bar = sec.start + lb
+                t = bar * 4 * 60 / BPM
+                print(f"  {int(t)//60}:{int(t)%60:02d}  bar {bar:3d}  {k}")
