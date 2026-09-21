@@ -280,11 +280,31 @@ at source, and the limiter is doing slightly less work than before (glue comp
 -1.5 dB; the final master sits at 5.0 LU).
 
 These measurements were made on the first, busier arrangement; the exciter,
-the slotting and the stem capture all carried over to the second, where the
-drop now measures 3-6 dB *less* hyped from 1.6 to 4 kHz than before -- the
-presence that used to come from a background pluck texture and bells now
-comes from the clap, the organ's percussion harmonics and the vocal, which
-is where it comes from on a house record.
+the slotting and the stem capture all carried over to the club edit.
+
+**Reference matching.** The last pass compares the drop's third-octave
+spectrum against the tilt a commercial house master sits on: bass slightly
+above the 80-125 Hz anchor, about -3 dB per octave from 100 Hz to 1 kHz,
+about -4.5 dB per octave above that. The first measurement of the club edit
+was 4.2 dB RMS off that curve, in two specific places: 3-6 dB light at
+125-200 Hz, where warmth lives, and 5-11 dB hot from 8 to 16 kHz, which is
+hat and shaker fizz. Both were leftovers of the earlier "too dark" fix --
+high-passes at 150-170 Hz on the organ and pad that were cutting the
+organ's 16' drawbar, and top-shelf boosts on the master and hat channels
+that no longer had anything to rescue. Fixed at source first (organ
+high-pass 150 -> 100 Hz, pad and stab high-passes lowered, hat shelves
+removed, shaker -2 dB, the organ's 4th-6th drawbars pulled further out for
+the empty 1.6-2 kHz band), then the master tilted for the remainder.
+
+| band | before | after |
+|---|---|---|
+| 125-500 Hz, mean error | -2.8 dB | -1.1 dB |
+| 1-4 kHz, mean error | -1.0 dB | -0.6 dB |
+| 6.3-16 kHz, mean error | **+7.3 dB** | +0.1 dB |
+| RMS error, 63 Hz-16 kHz | 4.2 dB | **1.4 dB** |
+
+1.4 dB is inside the spread between real house masters, so the pass stops
+there rather than chasing the reference into the noise.
 
 ## Arrangement
 

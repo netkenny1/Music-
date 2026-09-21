@@ -292,8 +292,11 @@ def organ(freqs, dur, sr=SR, decay=0.30, sustain=0.30, click=1.0,
     rng = np.random.default_rng(seed)
     t = np.arange(n) / sr
     # (harmonic ratio, level): 16', 8', 5-1/3', 4', 2-2/3', 2', 1-3/5', 1'
+    # The upper drawbars (4th-6th harmonics: 1.5-2.4 kHz over a G4 top
+    # voice) are pulled further out than a "warm" registration would have
+    # them, because that band is otherwise empty in this mix.
     drawbars = [(0.5, 0.30), (1.0, 1.00), (1.5, 0.40), (2.0, 0.70),
-                (3.0, 0.30), (4.0, 0.40), (5.0, 0.12), (6.0, 0.16), (8.0, 0.10)]
+                (3.0, 0.35), (4.0, 0.55), (5.0, 0.28), (6.0, 0.28), (8.0, 0.10)]
     # slow vibrato, like a Leslie on chorale: 6 Hz, a few cents
     vib = 1.0 + 0.0025 * np.sin(2 * np.pi * 6.1 * t + rng.random() * 6.28)
 
@@ -318,7 +321,9 @@ def organ(freqs, dur, sr=SR, decay=0.30, sustain=0.30, click=1.0,
         perc_env(n, sr, 0.0003, 0.004, 8.0) * 0.25 * click
     out = out + clk[:, None]
     out = D.saturate(out, 1.4, "tube", sr, oversample=2)
-    out = F.apply(out, F.highpass(150.0, 0.707, sr))
+    # 100, not 150: the 16' drawbar of the lowest voice sits at 100-130 Hz
+    # and is most of what makes an organ chord sound warm under a bassline.
+    out = F.apply(out, F.highpass(100.0, 0.707, sr))
     return np.stack([fade(out[:, 0], sr), fade(out[:, 1], sr)], axis=-1)
 
 

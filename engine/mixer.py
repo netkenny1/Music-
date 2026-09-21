@@ -308,22 +308,23 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
 
     y = F.chain(
         y,
+        # Reference-matched: the drop's third-octave spectrum was measured
+        # against the tilt a commercial house master sits on (about -3
+        # dB/octave from 100 Hz to 1 kHz, -4.5 above). Before this pass it
+        # was 3-6 dB light at 125-200 Hz -- the warmth -- and 5-11 dB hot
+        # from 8 to 16 kHz, hat and shaker fizz left over from an earlier
+        # "too dark" correction. The channels were fixed first (the organ
+        # and pad high-passes were cutting the organ's 16' drawbar); the
+        # master only tilts the remainder.
         F.lowshelf(80.0, -0.9, 0.8, sr),       # the mix is already bass-forward
-        # 250 Hz used to be cut 1.6 dB to "keep the low-mids uncluttered".
-        # Measurement said the opposite: 160-400 Hz was already 7 dB below a
-        # pink reference, so the cut was deepening a hole rather than clearing
-        # mud. The boxiness it was aimed at actually sat an octave up, where
-        # four melodic voices all peaked at once.
-        F.peaking(250.0, -0.6, 0.9, sr),
-        F.peaking(540.0, -1.2, 1.1, sr),       # the shared pile-up
-        F.peaking(2400.0, 1.2, 0.8, sr),
-        # 4 kHz and above used to be pushed +3.2 and +4.0 dB. With nothing but
-        # noise percussion living up there, that was amplifying hiss to chase a
-        # presence the source never had. The channel exciters now generate real
-        # harmonics instead, so the master only has to tilt, not rescue.
-        F.peaking(4000.0, 2.4, 0.7, sr),
-        F.highshelf(9000.0, 3.2, 0.7, sr),     # air
-        F.highshelf(14000.0, 1.5, 0.6, sr),    # the top octave
+        F.peaking(170.0, 2.4, 1.0, sr),        # warmth: bass harmonics, organ 16'
+        F.peaking(250.0, 0.5, 0.9, sr),
+        F.peaking(540.0, -0.8, 1.1, sr),       # the shared pile-up
+        F.peaking(900.0, 1.2, 1.0, sr),
+        F.peaking(1800.0, 2.6, 0.9, sr),       # the hole under presence
+        F.peaking(4300.0, 3.2, 0.7, sr),
+        F.highshelf(9000.0, -1.0, 0.7, sr),
+        F.highshelf(14000.0, -5.5, 0.6, sr),   # the top octave, tamed
     )
 
     before = float(np.max(np.abs(y)))

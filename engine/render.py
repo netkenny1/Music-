@@ -521,7 +521,7 @@ def build_mixer(n, sr, fcurve):
 
     # The sub is sidechained too: it holds through the kick like the bass,
     # and two things at 45-90 Hz at once is mud, not weight.
-    mx.channel("sub", gain_db=-14.5, pan=0.0, mono_below=200.0,
+    mx.channel("sub", gain_db=-15.5, pan=0.0, mono_below=200.0,
                hp=26.0, lp=140.0, duck=0.92)
 
     mx.channel("impact", gain_db=-13.0, pan=0.0, mono_below=200.0,
@@ -530,7 +530,7 @@ def build_mixer(n, sr, fcurve):
     mx.channel("bass", gain_db=-9.5, pan=0.0, duck=0.92, mono_below=140.0,
                hp=28.0,
                eq=[F.peaking(95.0, 0.8, 1.0, sr),
-                   F.peaking(280.0, -2.0, 1.0, sr),
+                   F.peaking(170.0, 2.5, 1.0, sr),     # second harmonic: warmth
                    F.peaking(1100.0, 1.0, 0.9, sr)],
                excite=dict(band=(700.0, 2600.0), keep_above=2200.0,
                            drive=3.0, mix=0.35, mode="tube"),
@@ -543,22 +543,18 @@ def build_mixer(n, sr, fcurve):
                          release=0.100, makeup=2.0),
                sends={"room": 0.40, "plate": 0.16})
 
-    mx.channel("hat", gain_db=-11.5, pan=0.13, width=1.15, hp=420.0,
-               eq=[F.peaking(7000.0, 2.0, 0.9, sr),
-                   F.highshelf(10000.0, 2.0, 0.7, sr),
-                   F.highshelf(13500.0, 1.8, 0.6, sr)],
+    mx.channel("hat", gain_db=-12.0, pan=0.13, width=1.15, hp=420.0,
+               eq=[F.peaking(7000.0, 1.0, 0.9, sr)],
                sends={"room": 0.12}, filter_curve=fcurve)
 
     mx.channel("ohat", gain_db=-12.0, pan=-0.20, width=1.22, hp=420.0,
-               eq=[F.highshelf(12000.0, 1.6, 0.6, sr)],
                duck=0.30, sends={"room": 0.16}, filter_curve=fcurve)
 
-    mx.channel("shaker", gain_db=-19.0, pan=0.40, width=1.1, hp=2500.0,
+    mx.channel("shaker", gain_db=-21.0, pan=0.40, width=1.1, hp=2500.0,
                sends={"room": 0.10}, filter_curve=fcurve)
 
-    mx.channel("stab", gain_db=-10.5, width=1.30, duck=0.75, hp=170.0,
-               eq=[F.peaking(430.0, -1.5, 1.0, sr),
-                   F.peaking(2400.0, 1.5, 0.9, sr)],
+    mx.channel("stab", gain_db=-10.5, width=1.30, duck=0.75, hp=110.0,
+               eq=[F.peaking(2400.0, 1.5, 0.9, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
                            drive=4.0, mix=1.0, mode="tube"),
                comp=dict(threshold=-22.0, ratio=2.5, attack=0.008,
@@ -568,9 +564,9 @@ def build_mixer(n, sr, fcurve):
 
     # The pad is the thing the sidechain is heard on: a sustained chord
     # dipping 95 % on every kick is the pump.
-    mx.channel("pad", gain_db=-15.0, width=1.50, duck=0.95, hp=150.0,
-               eq=[F.peaking(330.0, -2.2, 0.9, sr),
-                   F.highshelf(9000.0, 1.5, 0.7, sr)],
+    mx.channel("pad", gain_db=-15.0, width=1.50, duck=0.95, hp=120.0,
+               eq=[F.peaking(330.0, -0.8, 0.9, sr),
+                   F.highshelf(9000.0, 1.0, 0.7, sr)],
                excite=dict(band=(700.0, 2400.0), keep_above=2500.0,
                            drive=4.4, mix=1.20, mode="tube"),
                sends={"hall": 0.55, "plate": 0.15},
