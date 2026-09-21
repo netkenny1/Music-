@@ -40,6 +40,28 @@ def _block_peak(x, block):
     return xp.reshape(nb, block).max(axis=1), nb
 
 
+def _true_block_peak(y, block, sr, oversample=4):
+    """
+    Per-block peak measured on an oversampled copy of the signal.
+
+    A digital sample stream only stores points on the waveform; the analog
+    signal a converter reconstructs between those points can be higher than
+    any stored sample. Those inter-sample (true) peaks are what clip a DAC or
+    an MP3 decoder even when the file measures below 0 dBFS. Detecting on a
+    4x-upsampled copy sees them; detecting on the raw samples does not.
+    """
+    n = len(y)
+    nb = int(np.ceil(n / block))
+    peaks = np.zeros(nb)
+    for c in range(y.shape[1]):
+        up = resample_poly(y[:, c].astype(np.float32), oversample, 1)
+        bp, _ = _block_peak(up, block * oversample)
+        if len(bp) < nb:
+            bp = np.concatenate([bp, np.zeros(nb - len(bp))])
+        peaks = np.maximum(peaks, bp[:nb])
+    return peaks
+
+
 def _expand(curve, block, n):
     """Block-rate curve -> sample rate, linearly interpolated."""
     src = np.arange(len(curve)) * block + block * 0.5
@@ -232,7 +254,8 @@ def saturate(x, drive=1.5, mode="tanh", sr=SR, oversample=4, mix=1.0):
 # Limiting
 # --------------------------------------------------------------------------
 
-def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070, block=16):
+def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070,
+          block=16, true_peak=True, peak=None):
     """
     Look-ahead brickwall limiter.
 
@@ -253,17 +276,31 @@ def limit(x, sr=SR, ceiling_db=-1.0, lookahead=0.005, release=0.070, block=16):
     requirement -- so smoothing can never reintroduce an overshoot. No clipping
     stage is needed to catch it.
 
-    The ceiling sits below 0 dBFS on purpose: inter-sample peaks between
-    digital samples can exceed the sample values themselves, and lossy encoders
-    reconstruct those, so a track mastered to exactly 0.0 distorts once it
-    becomes an MP3.
+    With `true_peak` enabled the detector measures an oversampled copy, so the
+    ceiling is honoured in dBTP (true peak) rather than dBFS. This is the
+    difference between a master that survives MP3 encoding and one that
+    crackles on playback despite measuring clean as a WAV.
     """
     mono_in = x.ndim == 1
     y = x[:, None] if mono_in else x
     n = len(y)
 
     ceiling = db(ceiling_db)
-    peak, nb = _block_peak(np.max(np.abs(y), axis=1), block)
+    # `peak` lets a caller supply the per-block peak array instead of having
+    # it measured here. The true-peak detector is the expensive part of a
+    # pass (a 4x resample of the whole signal), and a loudness-targeting loop
+    # calls the limiter several times on the *same* signal at different
+    # scalar gains. The true peak of g*y is exactly g times the true peak of
+    # y, so the caller can oversample once and pass peak0*g each time. The
+    # detector resamples in float32, so float32(g*y) and g*float32(y) round
+    # differently: outputs agree to ~2e-7 (-130 dB), not bit-for-bit.
+    if peak is not None:
+        nb = len(peak)
+    elif true_peak:
+        peak = _true_block_peak(y, block, sr)
+        nb = len(peak)
+    else:
+        peak, nb = _block_peak(np.max(np.abs(y), axis=1), block)
 
     need = np.ones(nb)
     hot = peak > ceiling
@@ -297,3 +334,63 @@ def normalize(x, peak_db=-1.0):
     """Scale so the loudest sample sits at `peak_db`."""
     p = float(np.max(np.abs(x)))
     return x if p == 0 else x * (db(peak_db) / p)
+
+
+def exciter(x, sr=SR, band=(900.0, 3500.0), keep_above=2600.0,
+            drive=3.0, mix=0.5, mode="tanh"):
+    """
+    Aphex-style harmonic exciter: generate new high harmonics from the band
+    below them, then blend only the new content back in.
+
+    This exists because opening a lowpass and adding presence are not the same
+    operation. A filter can only reveal harmonics the oscillator already
+    produced; if the source is genuinely band-limited -- a supersaw stack
+    filtered at 1.5 kHz, say -- there is nothing above the cutoff to uncover,
+    and a shelving boost on the master only amplifies noise.
+
+    The order of operations is what makes it work, and getting it wrong makes
+    the effect useless. Saturating a *high-passed* copy produces almost nothing
+    when the source is dark, because the high-pass has already thrown away
+    everything that could have been distorted. Instead:
+
+      1. band-pass the region that still has energy (`band`),
+      2. saturate *that* -- a 1.2 kHz partial breeds new ones at 2.4 and
+         3.6 kHz, exactly where the presence is missing,
+      3. high-pass the result at `keep_above` so only the newly created
+         harmonics survive, not a second copy of the source,
+      4. blend.
+
+    The saturation runs oversampled; without it the new harmonics -- which by
+    construction sit near the top of the band -- would alias back down into the
+    midrange as inharmonic tones.
+    """
+    lo, hi = band
+    src = F.apply(x, F.highpass(lo, 0.707, sr))
+    src = F.apply(src, F.lowpass(hi, 0.707, sr))
+
+    # Normalise into the shaper. A waveshaper is only nonlinear near full
+    # scale: tanh(0.02) is 0.02 to four decimal places, so feeding it a quiet
+    # band -- which an isolated 1-3 kHz slice of a mix always is -- produces no
+    # harmonics at all regardless of the drive setting. Scaling to unity first
+    # makes `drive` mean the same thing whatever the source level, and the
+    # original peak is restored on the way out.
+    peak = float(np.max(np.abs(src)))
+    if peak < 1e-9:
+        return x
+    har = saturate(src / peak, drive, mode, sr, oversample=4) * peak
+    har = F.hp24(har, keep_above, 0.707, sr)
+    return x + har * mix
+
+
+def tilt(x, pivot=700.0, slope_db=3.0, sr=SR):
+    """
+    Broadband spectral tilt: shelve the top up and the bottom down by the same
+    amount around a pivot, so the overall level barely moves.
+
+    A tilt is the right tool for "too dark" or "too bright" as a whole. Two
+    opposing shelves keep the correction gentle and phase-coherent across the
+    whole spectrum, where a single large shelf would pile the entire change
+    into one end and change the loudness with it.
+    """
+    y = F.apply(x, F.lowshelf(pivot, -slope_db, 0.5, sr))
+    return F.apply(y, F.highshelf(pivot, slope_db, 0.5, sr))
