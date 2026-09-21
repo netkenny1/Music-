@@ -349,7 +349,7 @@ across a full phrase.
 | Build | bars 80-95 (2:35-3:06): bass out from bar 88, snare roll 92-95, silence on the last beat |
 | The drop | bar 96 (**3:06**) |
 | Mix-out | bars 160-191 (5:10-6:11): organ and pad out at 168, bass at 176, clap and open hat at 184, kick to the end |
-| Loudness | −10.6 LUFS integrated, −1.00 dBTP, 6.9 LU range — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth |
+| Loudness | −10.6 LUFS integrated, −1.00 dBTP, 6.4 LU range — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth |
 
 The MP3 carries `TBPM` and `TKEY` tags so Rekordbox, Serato and Traktor pick
 the tempo and key up on import rather than guessing.
@@ -379,12 +379,12 @@ ITU-R BS.1770-4 loudness, true-peak detection and stereo correlation, and
 | Metric | Value | Why it matters |
 |---|---|---|
 | Integrated loudness | −10.6 LUFS | Club level, deliberately not pushed to the −9 the limiter could reach: at that point it was saturated and flattening the kick |
-| Loudness range | 6.9 LU | Real contrast: the breakdown sits at −18 LUFS, the drop at −9.3 |
+| Loudness range | 6.4 LU | Real contrast: the breakdown sits at −17 LUFS, the drop at −9.3 |
 | True peak | ≈ −1.0 dBTP | Survives MP3 encoding without clipping |
-| Crest factor | 11.0 dB | Loud but not squashed flat |
+| Crest factor | 11.1 dB | Loud but not squashed flat |
 | Bass correlation | 1.00 | Low end is perfectly mono — no cancellation on a club sub |
-| High correlation | 0.46 | Wide stereo image above 300 Hz |
-| Mono sum delta | −0.2 dB | Almost nothing lost when summed to mono |
+| High correlation | 0.44 | Wide stereo image above 300 Hz |
+| Mono sum delta | −0.3 dB | Almost nothing lost when summed to mono |
 
 The true-peak number is the one worth explaining. An early render measured
 −0.90 dBFS by sample peak but **+0.82 dBTP** — the waveform *between* samples
