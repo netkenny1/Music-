@@ -124,6 +124,7 @@ MICRO_TIMING = {
     "texture": +2.0,   # background notes ride close to the grid
     "tamb":    +8.0,   # jingles sit back with the clap
     "conga":   +3.0,
+    "clave":   +2.0,
     "bells":   +4.0,
 }
 

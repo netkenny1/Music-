@@ -316,9 +316,10 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         # "too dark" correction. The channels were fixed first (the organ
         # and pad high-passes were cutting the organ's 16' drawbar); the
         # master only tilts the remainder.
-        F.lowshelf(80.0, -0.9, 0.8, sr),       # the mix is already bass-forward
+        F.lowshelf(80.0, -0.3, 0.8, sr),       # deep tech: the sub stays
         F.peaking(170.0, 2.4, 1.0, sr),        # warmth: bass harmonics, organ 16'
         F.peaking(250.0, 0.5, 0.9, sr),
+        F.peaking(400.0, 1.5, 1.2, sr),        # the hole between congas and stab
         F.peaking(540.0, -0.8, 1.1, sr),       # the shared pile-up
         F.peaking(900.0, 1.2, 1.0, sr),
         F.peaking(1800.0, 2.6, 0.9, sr),       # the hole under presence

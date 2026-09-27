@@ -42,8 +42,12 @@ class DrumCache:
 
     def __init__(self, sr=SR):
         self.sr = sr
-        self.kick = [I.kick(sr, seed=11 + i, f_start=168 + i * 3,
-                            decay=0.33 + i * 0.006, drive=2.1 + i * 0.05)
+        # A minimal-tech kick: shorter than the house one (240 ms tail,
+        # not 330), a touch more click, driven a little harder. At 130 BPM
+        # a long kick tail runs into the off-beat where the tumbao lands.
+        self.kick = [I.kick(sr, seed=11 + i, f_start=178 + i * 3, f_end=49.0,
+                            decay=0.24 + i * 0.005, drive=2.3 + i * 0.05,
+                            click=1.15)
                      for i in range(3)]
         self.clap = [I.clap(sr, seed=23 + i * 7) for i in range(3)]
         self.snare = [I.snare(sr, seed=31 + i * 5, tune=185 + i * 4)
@@ -55,6 +59,19 @@ class DrumCache:
         self.shaker = [I.shaker(sr, 0.085 + i * 0.006, seed=57 + i * 11)
                        for i in range(4)]
         self.crash = [I.crash(sr, 2.7, seed=71 + i * 8) for i in range(2)]
+        # the Latin layer
+        self.conga_hi = [I.conga(sr, high=True, seed=179 + i * 5) for i in range(3)]
+        self.conga_lo = [I.conga(sr, high=False, seed=185 + i * 5) for i in range(3)]
+        self.conga_slap = [I.conga(sr, high=True, seed=189 + i * 5, slap=True)
+                           for i in range(3)]
+        self.bongo_hi = [I.bongo(sr, True, seed=193 + i * 5) for i in range(3)]
+        self.bongo_lo = [I.bongo(sr, False, seed=197 + i * 5) for i in range(3)]
+        self.cowbell = [I.cowbell(sr, seed=181 + i * 3, tune=1.0 + i * 0.012)
+                        for i in range(2)]
+        self.clave = [I.clave(sr, seed=191 + i * 3, tune=2500.0 + i * 40.0)
+                      for i in range(3)]
+        self.rim = [I.rim(sr, seed=61 + i * 7, tune=420.0 + i * 15.0)
+                    for i in range(3)]
 
     def pick(self, bank, i):
         return bank[i % len(bank)]
@@ -181,7 +198,8 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
         return pos if jitter <= 0 else humanize(pos, jitter)
 
     counters = {k: 0 for k in
-                ("kick", "clap", "hat", "ohat", "shaker", "snare", "crash")}
+                ("kick", "clap", "hat", "ohat", "shaker", "snare", "crash",
+                 "conga", "bongo", "cowbell", "clave", "rim", "piano", "brass")}
 
     # Note pools: a few round-robin variants per (pitch, tone) instead of a
     # fresh synthesis for every hit. Same trick as the drum cache.
@@ -296,12 +314,79 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         rng.uniform(0.85, 1.08),
                         place("shaker", bar, step, jitter=1.8))
 
+            # ---------------- the Latin layer -----------------------------
+            two = bar % 2                  # position in the 2-bar clave cycle
+
+            # The clave is the one percussion part that survives the thin
+            # bars: it is the timeline, and a timeline with nothing on it
+            # is the emptiest a Latin record ever gets.
+            if part_state(sec, "clave", lb) and (not thin or "clave" in C.THIN_KEEP):
+                for step, vel in pattern_hits("clave_a" if two == 0 else "clave_b"):
+                    if muted(step):
+                        continue
+                    mx.channels["bells"].add(
+                        cache.pick(cache.clave, nxt("clave")) * vel * rng.uniform(0.9, 1.0),
+                        place("clave", bar, step, jitter=1.0), pan=0.35)
+
+            # Conga tumbao: ghosts and slap on the low drum (left), open
+            # tones on the high drum (right), the low drum answering on
+            # the bombo in bar B. Two drums, two sides of the stage.
+            if part_state(sec, "conga", lb) and not thin:
+                for step, vel in pattern_hits("conga_ghost"):
+                    if not muted(step):
+                        mx.channels["perc"].add(
+                            cache.pick(cache.conga_lo, nxt("conga")) * vel * 0.55,
+                            place("conga", bar, step, jitter=2.0), pan=-0.30)
+                for step, vel in pattern_hits("conga_slap"):
+                    if not muted(step):
+                        mx.channels["perc"].add(
+                            cache.pick(cache.conga_slap, nxt("conga")) * vel * 0.9,
+                            place("conga", bar, step, jitter=1.5), pan=-0.30)
+                for step, vel in pattern_hits("conga_open_a" if two == 0 else "conga_open_b"):
+                    if not muted(step):
+                        mx.channels["perc"].add(
+                            cache.pick(cache.conga_hi, nxt("conga")) * vel * rng.uniform(0.9, 1.0),
+                            place("conga", bar, step, jitter=1.5), pan=0.30)
+                if two == 1:
+                    for step, vel in pattern_hits("conga_low_b"):
+                        if not muted(step):
+                            mx.channels["perc"].add(
+                                cache.pick(cache.conga_lo, nxt("conga")) * vel,
+                                place("conga", bar, step, jitter=1.5), pan=-0.30)
+
+            if part_state(sec, "cowbell", lb) and not thin:
+                for step, vel in pattern_hits("cowbell"):
+                    if not muted(step):
+                        g = 1.0 if vel > 1.05 else 0.78
+                        mx.channels["bells"].add(
+                            cache.pick(cache.cowbell, nxt("cowbell")) * g * rng.uniform(0.92, 1.0),
+                            place("bells", bar, step, jitter=1.2), pan=-0.45)
+
+            # Cascara on the timbale shell, the other hand of the bell.
+            if part_state(sec, "cascara", lb) and not thin:
+                for step, vel in pattern_hits("cascara_a" if two == 0 else "cascara_b"):
+                    if not muted(step):
+                        mx.channels["bells"].add(
+                            cache.pick(cache.rim, nxt("rim")) * vel * 0.8 * rng.uniform(0.88, 1.0),
+                            place("rim", bar, step, jitter=1.4), pan=0.5)
+
+            if part_state(sec, "bongo", lb) and not thin:
+                for step, ch in enumerate(C.P["bongo"]):
+                    if ch == "." or muted(step):
+                        continue
+                    bank = cache.bongo_hi if ch == "x" else cache.bongo_lo
+                    mx.channels["perc"].add(
+                        cache.pick(bank, nxt("bongo")) * C.VELOCITY[ch] * 0.75 *
+                        rng.uniform(0.85, 1.0),
+                        place("conga", bar, step, jitter=1.8), pan=0.55)
+
             # ---------------- bass ----------------------------------------
             bp = part_state(sec, "bass", lb)
             if bp:
                 name = bp if isinstance(bp, str) else "bass"
-                if sec.parts.get("bounce_second_half") and (lb % 8) >= 4:
-                    name = "bass_bounce2"
+                if sec.parts.get("bounce_second_half") and (lb % 8) >= 4 \
+                        and name == "bass_tumbao":
+                    name = "bass_tumbao2"
                 hits = list(pattern_hits(name))
                 last_of_chord = (bar % C.CHORD_BARS) == C.CHORD_BARS - 1
                 for k, (step, vel) in enumerate(hits):
@@ -312,11 +397,15 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # overlap is what the sidechain pumps -- a bass that only
                     # plays between kicks has nothing for the duck to shape.
                     nxt_step = hits[k + 1][0] if k + 1 < len(hits) else 16 + hits[0][0]
-                    # the octave hits: the 16th after beat 3 in the bounce,
-                    # the 16th before beats 2 and 4 in the double bounce
-                    octave = ((name == "bass_bounce" and step == 8) or
-                              (name == "bass_bounce2" and step in (5, 13)))
+                    # The tumbao cell: the fifth ON beat 4, the anticipated
+                    # note on 4-and (the coming chord's fifth when the chord
+                    # is about to change, otherwise the root again). The
+                    # octave pop in the second-half pattern is the 16th
+                    # after beat 3.
+                    octave = (name == "bass_tumbao2" and step == 8)
                     note = chord.bass + (12 if octave else 0)
+                    if step == 12 and name.startswith("bass_tumbao"):
+                        note = C.fifth_of(chord)
                     if step == 14 and last_of_chord and not octave:
                         note = C.approach_note(bar)
                     if octave:
@@ -409,6 +498,41 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     mx.channels["keys"].add(k * vel * [1.0, 0.8, 0.9][j],
                                             place("keys", bar, step, jitter=0.8))
 
+            # ---------------- montuno piano -------------------------------
+            # The chord tones up and back down, in octaves, on the clave.
+            # Bar B starts four notes further along the arpeggio so the two
+            # bars are not the same shape twice.
+            if part_state(sec, "montuno", lb) and not thin:
+                name = "montuno_a" if two == 0 else "montuno_b"
+                tones = list(chord.voicing) + [chord.voicing[0] + 12]
+                seq = tones + tones[-2:0:-1]            # 5 up, 3 back: 8 notes
+                for j, (step, vel) in enumerate(pattern_hits(name)):
+                    if muted(step):
+                        continue
+                    m = seq[(j + (4 if two else 0)) % len(seq)]
+                    k = pooled("piano", (m,),
+                               lambda v: I.piano(midi_to_hz(m), clock.dur(4) / sr, sr,
+                                                 seed=229 + v * 3))
+                    mx.channels["piano"].add(k * vel * 0.9,
+                                             place("keys", bar, step, jitter=1.0),
+                                             pan=float(np.clip((m - 60) / 24.0, -0.5, 0.5)))
+
+            # ---------------- horn hook -----------------------------------
+            # Three stabs on the tresillo, once every four bars, on the
+            # upper structure of the chord (the bass owns the root). The
+            # third stab is held: a section does not play three short
+            # notes in a row, it plays two and leans on the third.
+            if part_state(sec, "brass", lb) and not thin and lb % 4 == 0:
+                freqs = [midi_to_hz(m + 12) for m in chord.voicing[:3]]
+                for j, (step, vel) in enumerate(pattern_hits("brass")):
+                    if muted(step):
+                        continue
+                    ln = clock.dur(2 if j < 2 else 6) / sr + 0.05
+                    h = pooled("brass", (tuple(chord.voicing), j >= 2),
+                               lambda v: I.horn(freqs, ln, sr, seed=223 + v * 5))
+                    mx.channels["brass"].add(h * vel * 0.9,
+                                             place("stab", bar, step, jitter=0.8))
+
             # ---------------- vocal hook ----------------------------------
             if part_state(sec, "vox", lb):
                 for vb, step, vowel, ln in C.VOX_HOOK:
@@ -480,8 +604,8 @@ def build_mixer(n, sr, fcurve):
     """
     Create every channel with its frequency slot, stereo position and depth.
 
-    Thirteen channels. Low end and backbeat dead centre; the top of the kit and
-    the chords fanned out. Everything tonal except the bass is sidechained
+    Seventeen channels. Low end and backbeat dead centre; the top of the kit,
+    the Latin percussion and the chords fanned out. Everything tonal except the bass is sidechained
     to the kick -- the pad and bass hard, so the whole harmonic bed pumps
     in time, which is the physical sensation of house.
     """
@@ -586,6 +710,39 @@ def build_mixer(n, sr, fcurve):
                sends={"hall": 0.40, "delay": 0.26, "plate": 0.18},
                filter_curve=fcurve)
 
+    # Congas and bongos: 160-500 Hz bodies, slaps at 2-5 kHz. The 700 Hz
+    # dip keeps their box out of the stab's lane; the room send is what
+    # makes two drums sound like they are in the same corner of the stage.
+    mx.channel("perc", gain_db=-11.5, width=1.15, hp=110.0,
+               eq=[F.peaking(260.0, 1.5, 1.2, sr),
+                   F.peaking(700.0, -1.5, 1.0, sr),
+                   F.peaking(3200.0, 2.0, 1.2, sr)],
+               comp=dict(threshold=-18.0, ratio=2.5, attack=0.004,
+                         release=0.090, makeup=2.0),
+               sends={"room": 0.30, "plate": 0.10}, filter_curve=fcurve)
+
+    # Cowbell, clave, cascara: the metal and wood, high-passed hard so the
+    # bell's 540 Hz fundamental never fights the bass harmonics.
+    mx.channel("bells", gain_db=-16.0, width=1.20, hp=500.0,
+               eq=[F.peaking(900.0, -1.0, 1.0, sr)],
+               sends={"room": 0.22, "delay": 0.06}, filter_curve=fcurve)
+
+    mx.channel("piano", gain_db=-9.0, width=1.25, duck=0.55, hp=180.0,
+               eq=[F.peaking(450.0, -1.2, 1.0, sr),
+                   F.peaking(3000.0, 1.5, 1.0, sr)],
+               comp=dict(threshold=-20.0, ratio=3.0, attack=0.005,
+                         release=0.100, makeup=2.5),
+               sends={"plate": 0.22, "delay": 0.20, "room": 0.10},
+               filter_curve=fcurve)
+
+    mx.channel("brass", gain_db=-11.0, width=1.30, duck=0.65, hp=170.0,
+               eq=[F.peaking(600.0, -1.0, 1.0, sr),
+                   F.peaking(1100.0, 2.0, 1.2, sr)],
+               comp=dict(threshold=-20.0, ratio=3.0, attack=0.010,
+                         release=0.150, makeup=2.5),
+               sends={"plate": 0.30, "delay": 0.22, "hall": 0.15},
+               filter_curve=fcurve)
+
     mx.channel("fx", gain_db=-14.5, width=1.40, hp=180.0,
                sends={"hall": 0.30, "plate": 0.18})
 
@@ -632,13 +789,13 @@ def write_wav(path, x, sr, bits=24):
 # libraries on BPM and initial key; without them the track has to be
 # re-analysed on import, and the analysers are not always right about the key.
 MP3_TAGS = {
-    "title": "Midnight Transit",
-    "genre": "House",
+    "title": C.TITLE,
+    "genre": "Tech House",
     "TBPM": str(int(C.BPM)) if float(C.BPM).is_integer() else str(C.BPM),
-    "TKEY": "Fm",                       # F minor -- Camelot 4A
+    "TKEY": C.KEY_TAG,
     "date": "2026",
-    "comment": "124 BPM, F minor (Camelot 4A). 32-bar beat intro and outro "
-               "for mixing. Synthesised entirely in code.",
+    "comment": f"{C.BPM:g} BPM, {C.KEY_NAME} (Camelot {C.CAMELOT}). 32-bar "
+               "beat intro and outro for mixing. Synthesised entirely in code.",
 }
 
 
@@ -713,7 +870,7 @@ def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
     # The pump follows the actual kick events, so it stops automatically
     # wherever the kick drops out.
     # Depth 0.9, 30 ms hold, 180 ms release: fully recovered 210 ms after
-    # the kick, which at 124 BPM is 30 ms before the off-beat where the
+    # the kick, which at 130 BPM is 20 ms before the off-beat where the
     # bass and the open hat land. The pump is deep and it never eats the
     # off-beat -- that timing is the whole trick.
     duck = D.duck_envelope(n, kicks, sr, depth=0.90, hold=0.030,
@@ -740,7 +897,7 @@ def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Render the house track.")
+    ap = argparse.ArgumentParser(description=f"Render {C.TITLE}.")
     ap.add_argument("--out", default="output", help="output directory")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--bars", default=None, metavar="A-B",
@@ -760,7 +917,7 @@ def main():
                                           parallel=not args.serial)
 
     os.makedirs(args.out, exist_ok=True)
-    stem = os.path.join(args.out, "midnight_transit")
+    stem = os.path.join(args.out, C.SLUG)
     if bars:
         stem += f"_bars{bars[0]}-{bars[1]}"      # never overwrite the master
 
