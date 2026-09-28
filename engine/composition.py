@@ -9,8 +9,11 @@ that never stops). The rules of that style, as applied here:
 
 * **Tempo and key.** 130 BPM, the top of the tech-house pocket; D minor,
   Camelot 7A, so it mixes with the whole Latin-tech shelf (most of it sits
-  in D, F, G and A minor). The bass root is D2 = 73 Hz -- lower than the
-  previous edit's F2, which is what makes a deep-tech record *deep*.
+  in D, F, G and A minor). The bass lives in F1-E2 (44-82 Hz): D2 = 73 Hz
+  for the tonic, G1 = 49, Bb1 = 58 and A1 = 55 Hz for the other roots.
+  Measured against the reference's 40-63 Hz bands that octave is where a
+  deep-tech record keeps its weight; the previous C2-B2 register was an
+  octave of harmonics with no fundamental under it.
 * **The kit is tighter and drier.** A short minimal-tech kick, clap on 2
   and 4, closed 16th hats, the off-beat open hat, a shaker. No swing to
   speak of (10 % of a 16th, an MPC 55 %): Latin tech runs straight so the
@@ -117,7 +120,7 @@ PROGRESSION = [
 ]
 
 CHORD_BARS = 2        # each chord lasts two bars, so the cycle is 8 bars
-BASS_LOW, BASS_HIGH = 36, 47     # C2 .. B2: where a deep-tech bass lives
+BASS_LOW, BASS_HIGH = 29, 40     # F1 .. E2 (44-82 Hz): where a deep-tech bass lives
 
 
 def chord_at(bar):
@@ -171,12 +174,16 @@ P = {
     # Backbeat on 2 and 4.
     "clap":        "....X.......X...",
 
-    # Closed hats: accent on the kick, a ghost, nothing on the off-8th (the
-    # open hat lives there), another ghost.
-    "hat":         "Xo.oXo.oXo.oXo.o",
+    # Closed hats on the quarter notes, riding with the kick. Measured on
+    # the reference's 7-14 kHz band: one accent per beat, the 16th after it
+    # is the hat's own tail, and the off-8th is *empty* -- there is no
+    # off-beat open hat in this style. The bass and the percussion carry
+    # the syncopation; the hat is the clock.
+    "hat":         "X...X...X...X...",
     "hat_8ths":    "x...x...x...x...",
 
-    # THE open hat, on the off-beat 8ths.
+    # The off-beat open hat, kept only as a low texture (-22 dB): on the
+    # reference the off-8th is silent above 7 kHz.
     "ohat":        "..x...x...x...x.",
 
     # Shaker on the 16ths, accents with the open hat.

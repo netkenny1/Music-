@@ -45,16 +45,16 @@ class DrumCache:
         # A minimal-tech kick: shorter than the house one (240 ms tail,
         # not 330), a touch more click, driven a little harder. At 130 BPM
         # a long kick tail runs into the off-beat where the tumbao lands.
-        self.kick = [I.kick(sr, seed=11 + i, f_start=178 + i * 3, f_end=49.0,
-                            decay=0.24 + i * 0.005, drive=2.3 + i * 0.05,
+        self.kick = [I.kick(sr, seed=11 + i, f_start=178 + i * 3, f_end=44.0,
+                            decay=0.26 + i * 0.005, drive=2.3 + i * 0.05,
                             click=1.15)
                      for i in range(3)]
         self.clap = [I.clap(sr, seed=23 + i * 7) for i in range(3)]
         self.snare = [I.snare(sr, seed=31 + i * 5, tune=185 + i * 4)
                       for i in range(3)]
-        self.hat = [I.hihat(sr, 0.052 + i * 0.004, tone=1.0 + i * 0.03,
+        self.hat = [I.hihat(sr, 0.075 + i * 0.004, tone=1.0 + i * 0.03,
                             seed=41 + i * 9) for i in range(4)]
-        self.ohat = [I.hihat(sr, 0.30 + i * 0.02, tone=0.97 + i * 0.03,
+        self.ohat = [I.hihat(sr, 0.22 + i * 0.02, tone=0.92 + i * 0.03,
                              seed=45 + i * 9, open_hat=True) for i in range(3)]
         self.shaker = [I.shaker(sr, 0.085 + i * 0.006, seed=57 + i * 11)
                        for i in range(4)]
@@ -293,6 +293,11 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     # brightness tracks section energy: quieter sections get
                     # darker hats, which reads as "further away"
                     g = vel * rng.uniform(0.9, 1.05) * (0.74 + 0.32 * e)
+                    # Ghosts sit well under the accents: the reference's
+                    # hat line is beat accents with the in-between 16ths
+                    # 8-14 dB down, and that dynamic is the groove.
+                    if vel < 1.0:
+                        g *= 0.65
                     mx.channels["hat"].add(
                         cache.pick(cache.hat, nxt("hat")) * g,
                         place("hat", bar, step, jitter=1.2))
@@ -326,7 +331,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         continue
                     mx.channels["bells"].add(
                         cache.pick(cache.clave, nxt("clave")) * vel * rng.uniform(0.9, 1.0),
-                        place("clave", bar, step, jitter=1.0), pan=0.35)
+                        place("clave", bar, step, jitter=1.0), pan=0.17)
 
             # Conga tumbao: ghosts and slap on the low drum (left), open
             # tones on the high drum (right), the low drum answering on
@@ -336,23 +341,23 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     if not muted(step):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_lo, nxt("conga")) * vel * 0.55,
-                            place("conga", bar, step, jitter=2.0), pan=-0.30)
+                            place("conga", bar, step, jitter=2.0), pan=-0.15)
                 for step, vel in pattern_hits("conga_slap"):
                     if not muted(step):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_slap, nxt("conga")) * vel * 0.9,
-                            place("conga", bar, step, jitter=1.5), pan=-0.30)
+                            place("conga", bar, step, jitter=1.5), pan=-0.15)
                 for step, vel in pattern_hits("conga_open_a" if two == 0 else "conga_open_b"):
                     if not muted(step):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_hi, nxt("conga")) * vel * rng.uniform(0.9, 1.0),
-                            place("conga", bar, step, jitter=1.5), pan=0.30)
+                            place("conga", bar, step, jitter=1.5), pan=0.15)
                 if two == 1:
                     for step, vel in pattern_hits("conga_low_b"):
                         if not muted(step):
                             mx.channels["perc"].add(
                                 cache.pick(cache.conga_lo, nxt("conga")) * vel,
-                                place("conga", bar, step, jitter=1.5), pan=-0.30)
+                                place("conga", bar, step, jitter=1.5), pan=-0.15)
 
             if part_state(sec, "cowbell", lb) and not thin:
                 for step, vel in pattern_hits("cowbell"):
@@ -360,7 +365,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                         g = 1.0 if vel > 1.05 else 0.78
                         mx.channels["bells"].add(
                             cache.pick(cache.cowbell, nxt("cowbell")) * g * rng.uniform(0.92, 1.0),
-                            place("bells", bar, step, jitter=1.2), pan=-0.45)
+                            place("bells", bar, step, jitter=1.2), pan=-0.23)
 
             # Cascara on the timbale shell, the other hand of the bell.
             if part_state(sec, "cascara", lb) and not thin:
@@ -368,7 +373,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     if not muted(step):
                         mx.channels["bells"].add(
                             cache.pick(cache.rim, nxt("rim")) * vel * 0.8 * rng.uniform(0.88, 1.0),
-                            place("rim", bar, step, jitter=1.4), pan=0.5)
+                            place("rim", bar, step, jitter=1.4), pan=0.25)
 
             if part_state(sec, "bongo", lb) and not thin:
                 for step, ch in enumerate(C.P["bongo"]):
@@ -378,7 +383,7 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
                     mx.channels["perc"].add(
                         cache.pick(bank, nxt("bongo")) * C.VELOCITY[ch] * 0.75 *
                         rng.uniform(0.85, 1.0),
-                        place("conga", bar, step, jitter=1.8), pan=0.55)
+                        place("conga", bar, step, jitter=1.8), pan=0.28)
 
             # ---------------- bass ----------------------------------------
             bp = part_state(sec, "bass", lb)
@@ -615,27 +620,27 @@ def build_mixer(n, sr, fcurve):
     beat = 60.0 / C.BPM
     mx.bus("room", S.reverb_ir(sr, rt60=0.85, predelay=0.008, damping=0.55,
                                width=0.9, er_level=0.8, seed=7),
-           gain_db=-8.0, eq=[F.highpass(400.0, 0.707, sr),
-                              F.lowpass(9000.0, 0.707, sr)], width=1.1)
+           gain_db=-10.0, eq=[F.highpass(400.0, 0.707, sr),
+                              F.lowpass(9000.0, 0.707, sr)], width=1.0)
 
     mx.bus("plate", S.reverb_ir(sr, rt60=1.9, predelay=0.022, damping=0.45,
                                 width=1.15, er_level=0.35, seed=17),
-           gain_db=-9.5, eq=[F.highpass(320.0, 0.707, sr),
+           gain_db=-12.0, eq=[F.highpass(320.0, 0.707, sr),
                               F.lowpass(11000.0, 0.707, sr)],
-           width=1.2, duck=0.4)
+           width=1.0, duck=0.4)
 
     mx.bus("hall", S.reverb_ir(sr, rt60=3.6, predelay=0.045, damping=0.62,
                                width=1.3, er_level=0.25, seed=27),
-           gain_db=-11.0, eq=[F.highpass(260.0, 0.707, sr),
+           gain_db=-13.0, eq=[F.highpass(260.0, 0.707, sr),
                               F.lowpass(8000.0, 0.707, sr)],
-           width=1.35, duck=0.5)
+           width=1.1, duck=0.5)
 
     # Dotted-eighth delay: 0.75 of a beat, lands between the 16ths.
     mx.bus("delay", S.delay_ir(sr, time=beat * 0.75, feedback=0.40,
                                repeats=12, ping_pong=True, damping=0.55),
-           gain_db=-10.0, eq=[F.highpass(380.0, 0.707, sr),
+           gain_db=-12.0, eq=[F.highpass(380.0, 0.707, sr),
                               F.lowpass(7000.0, 0.707, sr)],
-           width=1.3, duck=0.5)
+           width=1.1, duck=0.5)
 
     # --- channels ---------------------------------------------------------
     mx.channel("kick", gain_db=-7.5, pan=0.0,
@@ -662,25 +667,29 @@ def build_mixer(n, sr, fcurve):
                          release=0.085, knee=5.0, makeup=3.0),
                filter_curve=fcurve)
 
-    mx.channel("clap", gain_db=-9.0, pan=0.0, width=1.25, hp=220.0,
+    mx.channel("clap", gain_db=-9.0, pan=0.0, width=1.05, hp=220.0,
                comp=dict(threshold=-20.0, ratio=2.5, attack=0.003,
                          release=0.100, makeup=2.0),
                sends={"room": 0.40, "plate": 0.16})
 
-    mx.channel("hat", gain_db=-12.0, pan=0.13, width=1.15, hp=420.0,
-               eq=[F.peaking(7000.0, 1.0, 0.9, sr)],
+    mx.channel("hat", gain_db=-5.5, pan=0.08, width=1.0, hp=420.0,
+               eq=[F.peaking(7000.0, 2.5, 0.9, sr)],
                sends={"room": 0.12}, filter_curve=fcurve)
 
-    mx.channel("ohat", gain_db=-12.0, pan=-0.20, width=1.22, hp=420.0,
+    mx.channel("ohat", gain_db=-22.0, pan=-0.10, width=1.0, hp=420.0,
                duck=0.30, sends={"room": 0.16}, filter_curve=fcurve)
 
-    mx.channel("shaker", gain_db=-21.0, pan=0.40, width=1.1, hp=2500.0,
+    mx.channel("shaker", gain_db=-17.5, pan=0.22, width=1.0, hp=2500.0,
                sends={"room": 0.10}, filter_curve=fcurve)
 
-    mx.channel("stab", gain_db=-10.5, width=1.30, duck=0.75, hp=110.0,
-               eq=[F.peaking(2400.0, 1.5, 0.9, sr)],
+    # Its exciter was putting the off-beat above 7 kHz, where the reference
+    # keeps the off-8th empty; the top of the stab is now shelved down and
+    # the exciter halved.
+    mx.channel("stab", gain_db=-12.0, width=1.15, duck=0.75, hp=110.0,
+               eq=[F.peaking(2400.0, 1.5, 0.9, sr),
+                   F.highshelf(6500.0, -6.0, 0.7, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
-                           drive=4.0, mix=1.0, mode="tube"),
+                           drive=4.0, mix=0.5, mode="tube"),
                comp=dict(threshold=-22.0, ratio=2.5, attack=0.008,
                          release=0.130, makeup=2.5),
                sends={"plate": 0.28, "delay": 0.16, "room": 0.08},
@@ -688,7 +697,7 @@ def build_mixer(n, sr, fcurve):
 
     # The pad is the thing the sidechain is heard on: a sustained chord
     # dipping 95 % on every kick is the pump.
-    mx.channel("pad", gain_db=-15.0, width=1.50, duck=0.95, hp=120.0,
+    mx.channel("pad", gain_db=-16.0, width=1.25, duck=0.95, hp=120.0,
                eq=[F.peaking(330.0, -0.8, 0.9, sr),
                    F.highshelf(9000.0, 1.0, 0.7, sr)],
                excite=dict(band=(700.0, 2400.0), keep_above=2500.0,
@@ -696,14 +705,14 @@ def build_mixer(n, sr, fcurve):
                sends={"hall": 0.55, "plate": 0.15},
                filter_curve=fcurve)
 
-    mx.channel("keys", gain_db=-14.0, pan=-0.12, width=1.20, duck=0.6, hp=200.0,
+    mx.channel("keys", gain_db=-14.0, pan=-0.08, width=1.05, duck=0.6, hp=200.0,
                eq=[F.peaking(400.0, -1.0, 1.0, sr)],
                excite=dict(band=(800.0, 3000.0), keep_above=2600.0,
                            drive=4.4, mix=1.20, mode="tube"),
                sends={"plate": 0.34, "delay": 0.18, "hall": 0.12},
                filter_curve=fcurve)
 
-    mx.channel("vox", gain_db=-16.0, width=1.18, duck=0.55, hp=220.0,
+    mx.channel("vox", gain_db=-16.0, width=1.0, duck=0.55, hp=220.0,
                eq=[F.peaking(1800.0, 2.2, 1.0, sr)],
                excite=dict(band=(900.0, 3200.0), keep_above=2700.0,
                            drive=4.4, mix=1.20, mode="tube"),
@@ -713,7 +722,7 @@ def build_mixer(n, sr, fcurve):
     # Congas and bongos: 160-500 Hz bodies, slaps at 2-5 kHz. The 700 Hz
     # dip keeps their box out of the stab's lane; the room send is what
     # makes two drums sound like they are in the same corner of the stage.
-    mx.channel("perc", gain_db=-11.5, width=1.15, hp=110.0,
+    mx.channel("perc", gain_db=-11.5, width=1.0, hp=110.0,
                eq=[F.peaking(260.0, 1.5, 1.2, sr),
                    F.peaking(700.0, -1.5, 1.0, sr),
                    F.peaking(3200.0, 2.0, 1.2, sr)],
@@ -723,11 +732,11 @@ def build_mixer(n, sr, fcurve):
 
     # Cowbell, clave, cascara: the metal and wood, high-passed hard so the
     # bell's 540 Hz fundamental never fights the bass harmonics.
-    mx.channel("bells", gain_db=-16.0, width=1.20, hp=500.0,
+    mx.channel("bells", gain_db=-15.0, width=1.0, hp=500.0,
                eq=[F.peaking(900.0, -1.0, 1.0, sr)],
                sends={"room": 0.22, "delay": 0.06}, filter_curve=fcurve)
 
-    mx.channel("piano", gain_db=-9.0, width=1.25, duck=0.55, hp=180.0,
+    mx.channel("piano", gain_db=-10.0, width=1.05, duck=0.55, hp=180.0,
                eq=[F.peaking(450.0, -1.2, 1.0, sr),
                    F.peaking(3000.0, 1.5, 1.0, sr)],
                comp=dict(threshold=-20.0, ratio=3.0, attack=0.005,
@@ -735,7 +744,7 @@ def build_mixer(n, sr, fcurve):
                sends={"plate": 0.22, "delay": 0.20, "room": 0.10},
                filter_curve=fcurve)
 
-    mx.channel("brass", gain_db=-11.0, width=1.30, duck=0.65, hp=170.0,
+    mx.channel("brass", gain_db=-12.0, width=1.05, duck=0.65, hp=170.0,
                eq=[F.peaking(600.0, -1.0, 1.0, sr),
                    F.peaking(1100.0, 2.0, 1.2, sr)],
                comp=dict(threshold=-20.0, ratio=3.0, attack=0.010,
@@ -743,7 +752,7 @@ def build_mixer(n, sr, fcurve):
                sends={"plate": 0.30, "delay": 0.22, "hall": 0.15},
                filter_curve=fcurve)
 
-    mx.channel("fx", gain_db=-14.5, width=1.40, hp=180.0,
+    mx.channel("fx", gain_db=-14.5, width=1.15, hp=180.0,
                sends={"hall": 0.30, "plate": 0.18})
 
     return mx

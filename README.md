@@ -71,18 +71,22 @@ after the onset; three stabs on the tresillo, once every four bars).
 the clave's 3-side, formant-filtered. A Latin-tech vocal is a chopped
 sample that happens to have a pitch.
 
-**Tighter, drier, deeper.** The kick tail is 240 ms not 330 (at 130 BPM a
+**Tighter, drier, deeper.** The kick tail is 260 ms not 330 (at 130 BPM a
 long tail runs into the off-beat where the tumbao lands), swing is 10 % of
 a 16th (an MPC 55 %) so the percussion carries the shuffle rather than the
-grid, and the bass root is D2 = 73 Hz, a fourth below the old F2.
+grid, and the bass lives in F1-E2, 44-82 Hz: D2 = 73 Hz for the tonic, G1 =
+49, Bb1 = 58 and A1 = 55 Hz for the other roots. The hat is a closed hat on
+the quarter notes and nothing else -- no off-beat open hat. Both of those
+came from measuring the record, not from taste; see *Measured against the
+record* below.
 
 The loop, one bar of each (the two-bar parts show both bars):
 
 ```
 kick      X...x...x...x...
 clap      ....X.......X...
-hat       Xo.oXo.oXo.oXo.o
-ohat      ..x...x...x...x.
+hat       X...X...X...X...
+ohat      ..x...x...x...x.   (texture only, -22 dB)
 clave     ....x...x.......   x.....x.....x...    2-3 son clave
 conga     o.o.X...o.o.x.x.   o.o.X.x.o.o.x.x.    ghosts, slap, open tones; low drum in bar B
 cowbell   X..x..x.x..x..x.
@@ -387,6 +391,31 @@ the empty 1.6-2 kHz band), then the master tilted for the remainder.
 1.4 dB is inside the spread between real house masters, so the pass stops
 there rather than chasing the reference into the noise.
 
+**Measured against the record.** The generic house curve above was a
+stand-in. For the Latin-tech edit the reference itself was measured: the
+public 30-second preview clip of *Sonido Latino* (96 kbps, so nothing above
+12.5 kHz is trusted) was analysed with the same tools -- third-octave tilt
+anchored at 80-125 Hz, loudness, crest, stereo width per band, and the
+level of the kick, bass, percussion and hat bands at every 16th of a
+two-bar cycle. Nothing from the clip is used in the track; it is a ruler.
+Against it the first Latin-tech render was wrong in five specific ways:
+
+| What the record does | What this render did | Fix |
+|---|---|---|
+| Sub-bass 40-63 Hz sits 2-4 dB *above* the 80-125 Hz anchor | 4-9 dB *below* it: the bass roots were at 73-117 Hz, an octave of harmonics with no fundamental | Bass register F1-E2 (44-82 Hz); kick to 44 Hz; +4 dB shelf at 52 Hz |
+| Mids 500-1250 Hz scooped, about -10 dB re anchor | 3-5 dB hotter: organ, pad and horn piling up | Master +1.5 at 400 and +1.2 at 900 removed, -2.5 dB at 700; stab -1.5 dB |
+| Hats and shaker at 5-10 kHz around -9 dB re anchor | 7-8 dB darker | Hat +6.5 dB and brighter, shelf +5.5 dB at 6 kHz, +2 at 9 kHz |
+| Nearly mono: correlation 0.94, side/mid -11 dB at 2-8 kHz | Wide: 0.81, side/mid -2.6 dB | Every channel width 1.0-1.25 (was up to 1.5), pans halved, reverb buses -2 to -3 dB and narrowed, no master widening |
+| Hat band: one accent per beat, the off-8th *empty* | Off-beat open hat the loudest thing above 7 kHz | Hat on the quarter notes; open hat kept at -22 dB as texture; stab's exciter halved and shelved above 6.5 kHz |
+
+After three rounds on the drop window the third-octave error against the
+record is **1.09 dB RMS from 63 Hz to 10 kHz**, no band more than 2.4 dB
+out; correlation 0.95 (record 0.94); side/mid -8 dB at 2-8 kHz (record
+-11); crest 11.0 dB (record 11.9). Below 40 Hz the render is still 5-7 dB
+lighter than the record, which is deliberate: that region is where a club
+sub turns into rumble, and the record's 25-40 Hz content is most likely its
+own kick's tail rather than a note.
+
 ## Arrangement
 
 | Time | Bar | Section | Bars | What happens |
@@ -407,10 +436,10 @@ across a full phrase.
 
 | Element | What it does |
 |---|---|
-| **Kick** | Pitch-swept sine, 178 -> 49 Hz in 25 ms, 240 ms tail, saturated. Never micro-shifted, never varied |
+| **Kick** | Pitch-swept sine, 178 -> 44 Hz in 25 ms, 260 ms tail, saturated. Never micro-shifted, never varied |
 | **Clap** | Four bursts 9-11 ms apart plus a room tail, on 2 and 4, 9 ms late |
-| **Closed hat** | 16ths with the ghosts swung, choked out of the off-beat slot |
-| **Open hat** | Every off-beat 8th, the pendulum against the kick |
+| **Closed hat** | Quarter notes, riding with the kick: the clock of the record |
+| **Open hat** | Every off-beat 8th at -22 dB: a texture, not the pendulum -- the record's off-8th is empty above 7 kHz |
 | **Clave** | 2-3 son clave, wood block, in every section but the build; the last thing standing in the thin bars |
 | **Congas** | Two-bar tumbao: ghosts and slap on the low drum (left), open tones on the high drum (right) |
 | **Cowbell, cascara** | Double tresillo on the bell (left), 2-3 cascara on the rim (right), drops only |
@@ -458,8 +487,9 @@ The A7 is rootless (the bass has the A) so its C-sharp, the leading tone,
 is exposed and resolves up a semitone into the D of the next downbeat. The
 previous edit's i – VI – III – VII loop had no leading tone and circled;
 this one cadences every 8 bars, which is the salsa in it. The bass plays
-the roots (D2, G2, Bb2, A2), the fifth of the sounding chord on beat 4, and
-the fifth of the coming chord on the last 4-and before each change.
+the roots (D2, G1, Bb1, A1 -- 73, 49, 58 and 55 Hz), the fifth of the
+sounding chord on beat 4, and the fifth of the coming chord on the last
+4-and before each change.
 
 ## Measured output
 

@@ -316,16 +316,20 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         # "too dark" correction. The channels were fixed first (the organ
         # and pad high-passes were cutting the organ's 16' drawbar); the
         # master only tilts the remainder.
-        F.lowshelf(80.0, -0.3, 0.8, sr),       # deep tech: the sub stays
-        F.peaking(170.0, 2.4, 1.0, sr),        # warmth: bass harmonics, organ 16'
+        F.lowshelf(52.0, 4.0, 0.8, sr),        # 30-60 Hz: the reference's weight
+        F.peaking(90.0, -3.0, 1.6, sr),        # 80-100 Hz sat 1.5 dB proud of the rest
+        F.peaking(130.0, 2.5, 1.5, sr),        # the reference's 125 Hz band
+        F.peaking(170.0, 3.0, 1.0, sr),        # warmth: bass harmonics, organ 16'
         F.peaking(250.0, 0.5, 0.9, sr),
-        F.peaking(400.0, 1.5, 1.2, sr),        # the hole between congas and stab
+        F.peaking(400.0, 0.0, 1.2, sr),        # (was +1.5: the reference has the hole)
         F.peaking(540.0, -0.8, 1.1, sr),       # the shared pile-up
-        F.peaking(900.0, 1.2, 1.0, sr),
-        F.peaking(1800.0, 2.6, 0.9, sr),       # the hole under presence
-        F.peaking(4300.0, 3.2, 0.7, sr),
-        F.highshelf(9000.0, -1.0, 0.7, sr),
-        F.highshelf(14000.0, -5.5, 0.6, sr),   # the top octave, tamed
+        F.peaking(700.0, -2.5, 1.3, sr),       # minimal: 500-1000 Hz scooped
+        F.peaking(1800.0, 0.8, 0.9, sr),       # (was +2.6: reference is flatter here)
+        F.peaking(4300.0, 1.6, 0.7, sr),
+        F.peaking(5600.0, 2.5, 1.2, sr),       # 4.5-7 kHz: the reference's hat band
+        F.highshelf(6000.0, 5.5, 0.7, sr),     # 5-10 kHz: hats and shaker forward
+        F.peaking(9000.0, 2.0, 1.0, sr),
+        F.highshelf(14000.0, -4.5, 0.6, sr),   # the top octave, tamed
     )
 
     before = float(np.max(np.abs(y)))
@@ -338,7 +342,7 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     # width above 300 Hz only
     lo = F.apply(y, F.lowpass(300.0, 0.707, sr))
     hi = y - lo
-    y = lo + S.width(hi, 1.30)
+    y = lo + S.width(hi, 1.0)
     y = S.mono_below(y, 110.0, sr)
 
     y = D.saturate(y, drive=1.5, mode="tube", sr=sr, oversample=4, mix=0.35)
