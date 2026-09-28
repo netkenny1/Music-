@@ -465,7 +465,7 @@ across a full phrase.
 | Build | bars 80-95 (2:27-2:57): bass out from bar 88, snare roll 92-95, silence on the last beat |
 | The drop | bar 96 (**2:57**) |
 | Mix-out | bars 160-191 (4:55-5:54): organ and pad out at 168, bass and congas at 176, clap, open hat and clave at 184, kick to the end |
-| Loudness | −10.6 LUFS integrated, −1.00 dBTP, 6.3 LU range — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth |
+| Loudness | −10.6 LUFS integrated, −1.00 dBTP, 6.5 LU range — club level with the limiter backed off so the kick keeps its transient; DJs gain-match in the booth |
 
 The MP3 carries `TBPM` and `TKEY` tags so Rekordbox, Serato and Traktor pick
 the tempo and key up on import rather than guessing.
@@ -500,21 +500,21 @@ ITU-R BS.1770-4 loudness, true-peak detection and stereo correlation, and
 | Metric | Value | Why it matters |
 |---|---|---|
 | Integrated loudness | −10.6 LUFS | Club level, deliberately not pushed to the −9 the limiter could reach: at that point it was saturated and flattening the kick |
-| Loudness range | 6.3 LU | Real contrast: the breakdown sits at −15.5 LUFS, the drops at −9.5 / −9.4 |
+| Loudness range | 6.5 LU | Real contrast: the breakdown sits at −16.2 LUFS, the drops at −9.7 / −9.4 |
 | True peak | −1.00 dBTP | Survives MP3 encoding without clipping |
-| Crest factor | 11.4 dB | Loud but not squashed flat |
-| Bass correlation | 0.99 | Low end is mono — no cancellation on a club sub |
-| High correlation | 0.49 | Wide stereo image above 300 Hz |
-| Mono sum delta | −0.4 dB | Almost nothing lost when summed to mono |
+| Crest factor | 10.8 dB | Loud but not squashed flat (the reference clip measures 11.9) |
+| Bass correlation | 1.00 | Low end is mono — no cancellation on a club sub |
+| High correlation | 0.81 | Narrow, club-style image above 300 Hz; the whole-mix correlation is 0.96 against the record's 0.94 |
+| Mono sum delta | −0.1 dB | Nothing lost when summed to mono |
 
 Whole-track checks on the Latin-tech master (`scratchpad/latin_check.py`
 logic, reproducible from the WAV): the kick is absent (sub band down
 15-25 dB) for all sixteen breakdown bars, back on the first bar of the
 build, and cut on the last beat before the drop; the clave's 2-4.6 kHz band
-is 4.1-4.5 dB louder on its five hits per two bars than a 16th later,
+is 3.9-5.5 dB louder on its five hits per two bars than a 16th later,
 in the full groove and in the thinned bars alike; and the drop's
-third-octave spectrum sits 1.45 dB RMS from the house-master reference
-curve without re-tuning the master for the new key.
+third-octave spectrum sits 1.09 dB RMS from the record's own measured
+curve (63 Hz-10 kHz).
 
 The true-peak number is the one worth explaining. An early render measured
 −0.90 dBFS by sample peak but **+0.82 dBTP** — the waveform *between* samples
