@@ -24,6 +24,7 @@ from dsp.core import SR, db, stereo
 from dsp import filters as F
 from dsp import dynamics as D
 from dsp import space as S
+import plugins as PL
 
 
 # --------------------------------------------------------------------------
@@ -65,7 +66,16 @@ def _process_bus(bus_name):
     mx, duck = _SHARED["mx"], _SHARED["duck"]
     cfg = mx.buses[bus_name]
     src = _SHARED["sends"][bus_name]
-    wet = S.convolve(src, cfg["ir"])
+    if cfg.get("plugin") and PL.available()["reverb"]:
+        # A real algorithmic reverb (Dragonfly) instead of the convolution
+        # IR, level-matched to the IR so the bus balance does not move.
+        sr = mx.sr
+        ref = PL._energy_gain(lambda s: S.convolve(s, cfg["ir"]), sr)
+        wet = PL.reverb(cfg["plugin"], src, sr)
+        got = PL._energy_gain(lambda s: PL.reverb(cfg["plugin"], s, sr), sr)
+        wet = wet * (ref / max(got, 1e-9))
+    else:
+        wet = S.convolve(src, cfg["ir"])
     for coeffs in cfg["eq"]:
         wet = F.apply(wet, coeffs)
     if cfg["width"] != 1.0:
@@ -201,10 +211,14 @@ class Mixer:
         self.channels[name] = ch
         return ch
 
-    def bus(self, name, ir, gain_db=0.0, eq=None, width=1.0, duck=0.0):
-        """Register an effect return fed by channel sends."""
+    def bus(self, name, ir, gain_db=0.0, eq=None, width=1.0, duck=0.0,
+            plugin=None):
+        """Register an effect return fed by channel sends. `plugin`
+        ('hall' or 'plate') runs a Dragonfly reverb in place of the IR when
+        the plugins are installed; the IR is the fallback and the level
+        reference."""
         self.buses[name] = dict(ir=ir, gain_db=gain_db, eq=eq or [],
-                                width=width, duck=duck)
+                                width=width, duck=duck, plugin=plugin)
 
     def render(self, duck_env=None, verbose=True, keep_stems=False,
                parallel=True):
@@ -316,7 +330,7 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         # "too dark" correction. The channels were fixed first (the organ
         # and pad high-passes were cutting the organ's 16' drawbar); the
         # master only tilts the remainder.
-        F.lowshelf(52.0, 4.0, 0.8, sr),        # 30-60 Hz: the reference's weight
+        F.lowshelf(52.0, 5.5, 0.8, sr),        # 30-60 Hz: the reference's weight
         F.peaking(90.0, -3.0, 1.6, sr),        # 80-100 Hz sat 1.5 dB proud of the rest
         F.peaking(130.0, 2.5, 1.5, sr),        # the reference's 125 Hz band
         F.peaking(170.0, 3.0, 1.0, sr),        # warmth: bass harmonics, organ 16'
@@ -333,8 +347,15 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     )
 
     before = float(np.max(np.abs(y)))
-    y = D.compress(y, sr=sr, threshold=-16.0, ratio=2.0, attack=0.030,
-                   release=0.220, knee=8.0, makeup=0.0)
+    use_plugins = PL.available()["master"]
+    if use_plugins:
+        # LSP detects on RMS, the built-in compressor on peaks: -20 dB here
+        # gives the same 1.5 dB of glue on the drop as -16 dB there.
+        y = PL.glue(y, sr, threshold_db=-20.0, ratio=2.0, attack_ms=30.0,
+                    release_ms=220.0)
+    else:
+        y = D.compress(y, sr=sr, threshold=-16.0, ratio=2.0, attack=0.030,
+                       release=0.220, knee=8.0, makeup=0.0)
     if verbose:
         gr = 20 * np.log10(max(float(np.max(np.abs(y))), 1e-9) / max(before, 1e-9))
         print(f"    glue comp     {gr:+5.1f} dB")
@@ -363,9 +384,13 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
     peak0 = D._true_block_peak(y, 16, sr)
 
     def run(gain_db):
-        out = D.limit(y * db(gain_db), sr=sr, ceiling_db=ceiling_db,
-                      lookahead=0.005, release=0.070,
-                      peak=peak0 * db(gain_db))
+        if use_plugins:
+            # LSP Limiter: oversampled, look-ahead, 'Herm Thin' shaping.
+            out = PL.limit(y * db(gain_db), sr, ceiling_db=ceiling_db)
+        else:
+            out = D.limit(y * db(gain_db), sr=sr, ceiling_db=ceiling_db,
+                          lookahead=0.005, release=0.070,
+                          peak=peak0 * db(gain_db))
         return out, A.lufs_integrated(out, sr)
 
     g_prev = target_lufs - measured
@@ -396,7 +421,14 @@ def master_chain(mix, sr=SR, target_lufs=-9.3, ceiling_db=-0.9, verbose=True):
         g = g + (target_lufs - l) / slope
 
     out = best[2]
+    # True-peak guard: the plugin limiter is oversampled but its own meter
+    # is not the BS.1770 one; if anything slipped past, the engine's
+    # true-peak limiter takes the last fraction of a dB.
+    if use_plugins and A.true_peak_db(out, sr) > ceiling_db:
+        out = D.limit(out, sr=sr, ceiling_db=ceiling_db, lookahead=0.005,
+                      release=0.070)
     if verbose:
+        print(f"    limiter       {'LSP Limiter' if use_plugins else 'built-in'}")
         print(f"    limiter       drive {best[1]:+.2f} dB -> "
               f"{A.lufs_integrated(out, sr):.2f} LUFS "
               f"(target {target_lufs:.1f}), "

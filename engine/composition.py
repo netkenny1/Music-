@@ -40,9 +40,10 @@ that never stops). The rules of that style, as applied here:
 * **Vocal.** Chopped, rhythmic, two syllables ("eh / oh") on the clave's
   3-side, the way a Latin-tech vocal is a percussion instrument.
 
-The phrasing (32 intro / 32 groove / 16 break / 16 build / 64 drop / 32
-outro, fills on every 8th and 16th bar, crash on every 32nd) is unchanged:
-it is the form of the genre and the reason the record mixes.
+The phrasing (16 intro / 32 groove / 16 break / 16 build / 64 drop / 32
+outro, fills on every 8th and 16th bar, crash on every 32nd) is the form
+of the genre and the reason the record mixes; the intro is one 16-bar
+phrase rather than two, so the groove is running inside ten seconds.
 """
 
 from dataclasses import dataclass, field
@@ -282,7 +283,7 @@ class Section:
 
 def build_sections():
     """
-    The club edit: 192 bars, 5:54 at 130, in 8-, 16- and 32-bar blocks.
+    The club edit: 176 bars, 5:25 at 130, in 8-, 16- and 32-bar blocks.
 
     Every part enters or leaves on a phrase boundary. A DJ counts in
     phrases and a crowd hears in phrases; an element arriving on bar 13
@@ -296,23 +297,25 @@ def build_sections():
         S.append(Section(name, b, length, energy, parts))
         b += length
 
-    # --- 32 bars: DJ intro. One element every 8 bars. ---------------------
-    # 0-7 kick and 8th hats. 8-15 open hat, clap, clave: the timeline is
-    # set before anything plays against it. 16-23 bass and shaker. 24-31
-    # the conga tumbao and the stab under an opening filter.
-    add("intro", 32, 0.45,
-        kick=True, hat="hat_8ths", hat_from=0,
-        hat16_from=8, ohat_from=8, clap_from=8, clave_from=8,
-        bass_from=16, shaker_from=16, sub_layer=True,
-        conga_from=24, stab_from=24, pad_from=24,
-        filter_sweep=(2200, 20000), crash_at=[0, 16])
+    # --- 16 bars: DJ intro. One element every 4 bars. ---------------------
+    # 0-3 kick, 8th hats and the clave: the timeline is set from the first
+    # bar. 4-7 clap, shaker and the bass. 8-11 the conga tumbao, open hat,
+    # 16th hats, stab and pad under an opening filter. 12-15 the cowbell.
+    # Half the length of a classic 32-bar DJ intro -- still one 16-bar
+    # phrase to mix over, but the record is moving within ten seconds.
+    add("intro", 16, 0.60,
+        kick=True, hat="hat_8ths", hat_from=0, clave=True,
+        clap_from=4, shaker_from=4, bass_from=4, sub_layer=True,
+        hat16_from=8, ohat_from=8, conga_from=8, stab_from=8, pad_from=8,
+        cowbell_from=12,
+        filter_sweep=(1800, 20000), crash_at=[0])
 
-    # --- 32 bars: the groove. Everything in; cowbell and the vocal chops
-    # from bar 16. Fills at 7, 15, 23, 31. --------------------------------
+    # --- 32 bars: the groove. Everything in, the pad from the downbeat;
+    # the vocal chops from bar 8. Fills at 7, 15, 23, 31. -----------------
     add("main_a", 32, 0.85,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True, clave=True,
-        conga=True, bass="bass_tumbao", sub_layer=True, stab=True,
-        pad_from=8, cowbell_from=16, vox_from=16,
+        conga=True, cowbell=True, bass="bass_tumbao", sub_layer=True,
+        stab=True, pad=True, vox_from=8,
         crash_at=[0, 16], bounce_second_half=True)
 
     # --- 16 bars: breakdown. Drums out; the clave and conga keep talking

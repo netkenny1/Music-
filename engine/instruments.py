@@ -95,16 +95,18 @@ def clap(sr=SR, seed=23, bright=1.0):
     return fade(out, sr, 0.0003, 0.02)
 
 
-def snare(sr=SR, dur=0.24, tune=185.0, seed=31, snap=1.0):
-    """Snare for build-up rolls: tonal shell + noise wires."""
+def snare(sr=SR, dur=0.24, tune=196.0, seed=31, snap=1.0):
+    """Snare for build-up rolls: tonal shell + noise wires. The shell is
+    tuned to G3 with its partial a fifth up (D4), both in D minor, so a
+    32-hit roll into the drop never rubs against the chord under it."""
     n = int(dur * sr)
-    shell = (sine(tune, n, sr) + sine(tune * 1.48, n, sr) * 0.6) * \
+    shell = (sine(tune, n, sr) + sine(tune * 1.5, n, sr) * 0.6) * \
         perc_env(n, sr, 0.0005, 0.075, 4.5)
     wires = F.bandlimit(noise(n, seed=seed), 1500.0, 10000.0, sr) * \
         perc_env(n, sr, 0.0004, 0.10, 3.6)
     out = shell * 0.55 + wires * 0.75 * snap
     out = D.saturate(out, 1.5, "tanh", sr, oversample=2)
-    out = F.chain(out, F.highpass(150.0, 0.707, sr), F.peaking(3200.0, 3.0, 1.3))
+    out = F.chain(out, F.highpass(150.0, 0.707, sr), F.peaking(3136.0, 3.0, 1.3))
     return fade(out, sr, 0.0003, 0.012)
 
 
@@ -142,10 +144,11 @@ def shaker(sr=SR, dur=0.09, seed=57):
     return fade(x * perc_env(n, sr, 0.004, dur * 0.4, 3.0), sr, 0.002, 0.008)
 
 
-def rim(sr=SR, dur=0.10, tune=420.0, seed=61):
-    """Rimshot/click percussion for off-grid groove accents."""
+def rim(sr=SR, dur=0.10, tune=440.0, seed=61):
+    """Rimshot/click percussion for off-grid groove accents: A4 with its
+    overtone on C6 -- the fifth and the seventh of D minor."""
     n = int(dur * sr)
-    tone = (sine(tune, n, sr) + square(tune * 2.31, n, sr) * 0.35) * \
+    tone = (sine(tune, n, sr) + square(tune * 2.378, n, sr) * 0.35) * \
         perc_env(n, sr, 0.0003, 0.016, 7.0)
     nz = F.bandlimit(noise(n, seed=seed), 1800.0, 8000.0, sr) * \
         perc_env(n, sr, 0.0002, 0.010, 8.0)
@@ -478,8 +481,9 @@ def reverse_crash(dur=1.9, sr=SR, seed=157):
     return fade(c[::-1].copy(), sr, 0.02, 0.004)
 
 
-def sub_drop(dur=1.4, sr=SR, f0=110.0, f1=32.0, seed=163):
-    """Deep pitch-falling sine to underline a drop."""
+def sub_drop(dur=1.4, sr=SR, f0=110.0, f1=36.71, seed=163):
+    """Deep pitch-falling sine to underline a drop; it falls from A2 and
+    settles on D1, the root of the key, not a random sub rumble."""
     n = int(dur * sr)
     t = np.arange(n) / sr
     f = f1 + (f0 - f1) * np.exp(-t / (dur * 0.28))
@@ -595,19 +599,21 @@ def conga(sr=SR, high=True, seed=179, slap=False):
     """
     Conga: a pitched membrane with a fast pitch drop and a slap transient.
 
-    Three strokes. The *open tone* (`high`, the quinto) rings at 235 Hz; the
-    low drum (the tumba) at 165 Hz. The *slap* is the same head struck with
-    cupped fingers: the membrane is choked, so the tone is a third as long
-    and the noise of the hand is most of the sound. A tumbao is the
-    conversation between those strokes. All three sit at 160-450 Hz, under
-    the stabs and above the bass, a slot nothing else here occupies.
+    Three strokes. The *open tone* (`high`, the quinto) rings on A3; the
+    low drum (the tumba) on D3, the root. The *slap* is the same head struck
+    with cupped fingers: the membrane is choked, so the tone is a third as
+    long and the noise of the hand is most of the sound; it settles on C4.
+    A tumbao is the conversation between those strokes. All three sit at
+    140-450 Hz, under the stabs and above the bass, a slot nothing else here
+    occupies -- and all three are notes of D minor, so the drums play in key.
     """
-    f0, f1, dur = (410.0, 235.0, 0.26) if high else (290.0, 165.0, 0.34)
+    f0, f1, dur, tau = (385.0, 220.0, 0.26, 0.014) if high else \
+        (260.0, 146.83, 0.36, 0.014)
     if slap:
-        f0, f1, dur = (520.0, 260.0, 0.14)
+        f0, f1, dur, tau = (440.0, 257.5, 0.14, 0.008)   # reads as C4
     n = int(dur * sr)
     t = np.arange(n) / sr
-    f = f1 + (f0 - f1) * np.exp(-t / 0.018)
+    f = f1 + (f0 - f1) * np.exp(-t / tau)
     body = sine(f, n, sr) * perc_env(n, sr, 0.0006,
                                      dur * (0.25 if slap else 0.55), 3.8)
     slap_n = F.bandlimit(noise(n, seed=seed), 900.0 if not slap else 1300.0,
@@ -639,16 +645,17 @@ def cowbell(sr=SR, dur=0.28, seed=181, tune=1.0):
     """
     Cowbell: the 808 recipe, two square waves a non-integer ratio apart.
 
-    540 and 800 Hz (ratio 1.48) beat against each other instead of fusing,
-    which is what makes it clank rather than sing. A band-pass keeps it out
-    of the bass and the hats, and a resonance at 2.3 kHz is the mouth of the
+    D5 and A5 (587 and 880 Hz, a fifth) -- the 808 used 540/800, which lands
+    between C# and D and between G and G#; tuned to the key's root and fifth
+    the bell clanks without rubbing. A band-pass keeps it out of the bass
+    and the hats, and a resonance on D7 (2.35 kHz) is the mouth of the
     bell. It is the loudest thing in a salsa rhythm section for a reason:
     nothing else cuts a room like it.
     """
     n = int(dur * sr)
-    x = (square(540.0 * tune, n, sr) + square(800.0 * tune, n, sr)) * 0.5
+    x = (square(587.33 * tune, n, sr) + square(880.0 * tune, n, sr)) * 0.5
     x = F.bandlimit(x, 380.0, 6000.0, sr, q=0.9)
-    x = F.apply(x, F.peaking(2300.0, 3.0, 1.5, sr))
+    x = F.apply(x, F.peaking(2349.3, 3.0, 1.5, sr))
     env = perc_env(n, sr, 0.0005, dur * 0.5, 4.5)
     clk = F.bandlimit(noise(n, seed=seed), 1500.0, 6000.0, sr) * \
         perc_env(n, sr, 0.0002, 0.006, 8.0) * 0.3
@@ -656,14 +663,15 @@ def cowbell(sr=SR, dur=0.28, seed=181, tune=1.0):
     return fade(out, sr, 0.0003, 0.012)
 
 
-def clave(sr=SR, dur=0.12, tune=2500.0, seed=191):
+def clave(sr=SR, dur=0.12, tune=2349.32, seed=191):
     """
     Clave / wood block: a damped high sine with one inharmonic partial and
-    a click. Thirty-five milliseconds long. It is the timeline every Latin
+    a click, tuned to D7 with the partial on A7. Thirty-five milliseconds
+    long. It is the timeline every Latin
     part is phrased against, so it must be short enough to never blur.
     """
     n = int(dur * sr)
-    body = (sine(tune, n, sr) + sine(tune * 1.83, n, sr) * 0.4) * \
+    body = (sine(tune, n, sr) + sine(tune * 1.4983, n, sr) * 0.4) * \
         perc_env(n, sr, 0.0003, 0.035, 5.5)
     clk = F.bandlimit(noise(n, seed=seed), 2000.0, 9000.0, sr) * \
         perc_env(n, sr, 0.0002, 0.004, 9.0) * 0.5
@@ -673,15 +681,15 @@ def clave(sr=SR, dur=0.12, tune=2500.0, seed=191):
 
 def bongo(sr=SR, high=True, seed=193):
     """
-    Bongo: a small, tight head. The macho (high) at 480 Hz, the hembra
-    (low) at 300 Hz, both with a faster pitch drop and shorter ring than a
+    Bongo: a small, tight head. The macho (high) on A4, the hembra (low)
+    on D4, both with a faster pitch drop and shorter ring than a
     conga, so a martillo pattern reads as a rattle over the tumbao rather
     than a second tumbao.
     """
-    f0, f1, dur = (720.0, 480.0, 0.14) if high else (430.0, 300.0, 0.18)
+    f0, f1, dur = (660.0, 440.0, 0.14) if high else (392.0, 293.66, 0.18)
     n = int(dur * sr)
     t = np.arange(n) / sr
-    f = f1 + (f0 - f1) * np.exp(-t / 0.010)
+    f = f1 + (f0 - f1) * np.exp(-t / 0.006)
     body = sine(f, n, sr) * perc_env(n, sr, 0.0004, dur * 0.5, 4.5)
     slap = F.bandlimit(noise(n, seed=seed), 1500.0, 7000.0, sr) * \
         perc_env(n, sr, 0.0002, 0.006, 9.0)

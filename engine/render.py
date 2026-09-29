@@ -24,6 +24,9 @@ import groove as G
 from mixer import Mixer, master_chain
 import analysis as A
 
+# Kick sweep end point; the body's measured pitch lands on F1 (43.65 Hz).
+KICK_F_END = 42.6
+
 
 # ==========================================================================
 # Sample cache
@@ -42,15 +45,17 @@ class DrumCache:
 
     def __init__(self, sr=SR):
         self.sr = sr
-        # A minimal-tech kick: shorter than the house one (240 ms tail,
-        # not 330), a touch more click, driven a little harder. At 130 BPM
-        # a long kick tail runs into the off-beat where the tumbao lands.
-        self.kick = [I.kick(sr, seed=11 + i, f_start=178 + i * 3, f_end=44.0,
-                            decay=0.26 + i * 0.005, drive=2.3 + i * 0.05,
+        # A minimal-tech kick: shorter than the house one, a touch more
+        # click, driven a little harder. At 130 BPM a long kick tail runs
+        # into the off-beat where the tumbao lands. The body settles on F1
+        # (43.7 Hz) -- the lowest note of the bass range and in D minor --
+        # so kick and bass never beat against each other.
+        self.kick = [I.kick(sr, seed=11 + i, f_start=176 + i * 3, f_end=KICK_F_END,
+                            decay=0.28 + i * 0.005, drive=2.3 + i * 0.05,
                             click=1.15)
                      for i in range(3)]
         self.clap = [I.clap(sr, seed=23 + i * 7) for i in range(3)]
-        self.snare = [I.snare(sr, seed=31 + i * 5, tune=185 + i * 4)
+        self.snare = [I.snare(sr, seed=31 + i * 5, tune=196.0)
                       for i in range(3)]
         self.hat = [I.hihat(sr, 0.075 + i * 0.004, tone=1.0 + i * 0.03,
                             seed=41 + i * 9) for i in range(4)]
@@ -66,12 +71,12 @@ class DrumCache:
                            for i in range(3)]
         self.bongo_hi = [I.bongo(sr, True, seed=193 + i * 5) for i in range(3)]
         self.bongo_lo = [I.bongo(sr, False, seed=197 + i * 5) for i in range(3)]
-        self.cowbell = [I.cowbell(sr, seed=181 + i * 3, tune=1.0 + i * 0.012)
-                        for i in range(2)]
-        self.clave = [I.clave(sr, seed=191 + i * 3, tune=2500.0 + i * 40.0)
-                      for i in range(3)]
-        self.rim = [I.rim(sr, seed=61 + i * 7, tune=420.0 + i * 15.0)
-                    for i in range(3)]
+        # Round-robin variation on the pitched metal and wood comes from the
+        # noise seed only: a pitch offset per hit would put every third
+        # cowbell between two notes of the key.
+        self.cowbell = [I.cowbell(sr, seed=181 + i * 3) for i in range(2)]
+        self.clave = [I.clave(sr, seed=191 + i * 3) for i in range(3)]
+        self.rim = [I.rim(sr, seed=61 + i * 7) for i in range(3)]
 
     def pick(self, bank, i):
         return bank[i % len(bank)]
@@ -114,9 +119,12 @@ def build_filter_curve(clock, n, sr=SR):
 # How loud each section sits relative to the drops, before mastering.
 # Without this the limiter flattens everything to the same level and the
 # track has no arc -- measured loudness range collapses to under 3 LU, which
-# is what "loud but boring" sounds like on a meter.
+# is what "loud but boring" sounds like on a meter. The opposite also
+# happens: the LSP limiter reaches the target with less gain reduction on
+# the drops than the built-in one, so the quiet sections come out lower --
+# the break's gain here keeps it near -16.5 LUFS rather than -20.
 SECTION_GAIN = {
-    "intro": 0.80, "main_a": 0.95, "break": 0.55, "build": 0.86,
+    "intro": 0.88, "main_a": 0.95, "break": 0.85, "build": 0.95,
     "drop": 1.00, "drop_b": 1.00, "outro": 0.82,
 }
 
@@ -337,27 +345,46 @@ def sequence(mx, clock, cache, sr=SR, verbose=True, bars=None):
             # tones on the high drum (right), the low drum answering on
             # the bombo in bar B. Two drums, two sides of the stage.
             if part_state(sec, "conga", lb) and not thin:
+                # On the phrase's last bar the tumbao stops at beat 3 and
+                # the roll below takes over.
+                roll = fill == "fill_16"
                 for step, vel in pattern_hits("conga_ghost"):
-                    if not muted(step):
+                    if not muted(step) and not (roll and step >= 8):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_lo, nxt("conga")) * vel * 0.55,
                             place("conga", bar, step, jitter=2.0), pan=-0.15)
                 for step, vel in pattern_hits("conga_slap"):
-                    if not muted(step):
+                    if not muted(step) and not (roll and step >= 8):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_slap, nxt("conga")) * vel * 0.9,
                             place("conga", bar, step, jitter=1.5), pan=-0.15)
                 for step, vel in pattern_hits("conga_open_a" if two == 0 else "conga_open_b"):
-                    if not muted(step):
+                    if not muted(step) and not (roll and step >= 8):
                         mx.channels["perc"].add(
                             cache.pick(cache.conga_hi, nxt("conga")) * vel * rng.uniform(0.9, 1.0),
                             place("conga", bar, step, jitter=1.5), pan=0.15)
                 if two == 1:
                     for step, vel in pattern_hits("conga_low_b"):
-                        if not muted(step):
+                        if not muted(step) and not (roll and step >= 8):
                             mx.channels["perc"].add(
                                 cache.pick(cache.conga_lo, nxt("conga")) * vel,
                                 place("conga", bar, step, jitter=1.5), pan=-0.15)
+                # Conga roll into every 16-bar phrase: the last two beats
+                # as alternating low/high 16ths, rising from ghost level to
+                # full, the way a conguero pushes the band into the next
+                # section. D3 and A3 -- root and fifth -- so the roll
+                # outlines the key.
+                if roll:
+                    for k, step in enumerate(range(8, 16)):
+                        if muted(step):
+                            continue
+                        hi = k % 2 == 1
+                        vel = 0.45 + 0.55 * (k / 7.0) ** 1.4
+                        bank = cache.conga_hi if hi else cache.conga_lo
+                        mx.channels["perc"].add(
+                            cache.pick(bank, nxt("conga")) * vel,
+                            place("conga", bar, step, jitter=1.5),
+                            pan=0.15 if hi else -0.15)
 
             if part_state(sec, "cowbell", lb) and not thin:
                 for step, vel in pattern_hits("cowbell"):
@@ -627,13 +654,13 @@ def build_mixer(n, sr, fcurve):
                                 width=1.15, er_level=0.35, seed=17),
            gain_db=-12.0, eq=[F.highpass(320.0, 0.707, sr),
                               F.lowpass(11000.0, 0.707, sr)],
-           width=1.0, duck=0.4)
+           width=1.0, duck=0.4, plugin="plate")
 
     mx.bus("hall", S.reverb_ir(sr, rt60=3.6, predelay=0.045, damping=0.62,
                                width=1.3, er_level=0.25, seed=27),
            gain_db=-13.0, eq=[F.highpass(260.0, 0.707, sr),
                               F.lowpass(8000.0, 0.707, sr)],
-           width=1.1, duck=0.5)
+           width=1.1, duck=0.5, plugin="hall")
 
     # Dotted-eighth delay: 0.75 of a beat, lands between the 16ths.
     mx.bus("delay", S.delay_ir(sr, time=beat * 0.75, feedback=0.40,
@@ -847,7 +874,7 @@ def build_track(sr=SR, verbose=True, keep_stems=False, bars=None,
     Render the track, or with `bars=(a, b)` just bars a..b-1.
 
     A partial render is for iterating on a mix: a 24-bar drop takes a
-    fraction of the time of the full 192. It goes through exactly the same
+    fraction of the time of the full 176. It goes through exactly the same
     sequencer, mixer and master chain, so what you hear in the window is
     what that window will sound like in the full render -- with two honest
     caveats. Loudness targeting sees only the window, so the limiter drive
