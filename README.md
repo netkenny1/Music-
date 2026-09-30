@@ -522,12 +522,22 @@ of their own.
 | Time | Bar | Section | Bars | What happens |
 |---|---|---|---|---|
 | 0:00 | 0 | intro | 16 | DJ intro, one element every 4 bars. Kick, 8th hats and clave from bar 0; clap, shaker and bass at 4; congas, open hat, 16th hats, organ and pad at 8; cowbell at 12 |
-| 0:30 | 16 | main_a | 32 | The groove, pad and cowbell from the downbeat, vocal chops from 24. Fills at 23, 31, 39, 47, with a conga roll into every 16 |
+| 0:30 | 16 | main_a | 32 | The groove, pad and cowbell from the downbeat; vocal chops at 24; electric-piano riff at 32; organ out at 40 to open up into the break. Fills at 23, 31, 39, 47, with a conga roll into every 16 |
 | 1:28 | 48 | break | 16 | Drums out. Pad, electric piano, vocal over the clave; conga and the horn hook from 56 |
 | 1:58 | 64 | build | 16 | Kick back. Bass leaves at 72, riser, snare roll, kick to 8ths, last beat cut |
-| 2:28 | 80 | drop | 32 | The drop: crash, sub drop, tumbao bass, cowbell, cascara, horn hook every 4 bars |
-| 3:27 | 112 | drop_b | 32 | Montuno piano and bongos 112-127; thinned to kick/bass/clave/pad 128-135; all back 136 |
+| 2:28 | 80 | drop | 32 | The drop: crash, sub drop, tumbao bass, cowbell, horn hook every 4 bars; one layer more every 8 -- cascara at 88, vocal chops at 96, electric-piano riff at 104 |
+| 3:27 | 112 | drop_b | 32 | Montuno piano replaces the electric piano at 112, bongos join at 120; thinned to kick/bass/clave/pad 128-135; all back at 136 with the electric piano for the last run |
 | 4:26 | 144 | outro | 32 | DJ outro. Organ and pad out at 152, bass and conga at 160, clap, open hat and clave at 168, filter closing |
+
+**Something changes every 8 bars.** No 8-bar phrase repeats the one
+before it: at all 21 phrase boundaries at least one element enters or
+leaves. The first edit had six static phrases -- bars 32 and 40 of the
+groove, 88, 96 and 104 of the first drop, 120 of the second -- where the
+only change was a fill or a crash. Now the first drop stacks one layer per
+phrase (cascara, then vocal, then electric piano) instead of arriving all
+at once, and the groove alternates adding and removing. `render.elements_at`
+reads the arrangement exactly as the sequencer does, and `tests.py` fails
+if any phrase boundary is static.
 
 The intro is one 16-bar phrase, not the classic 32: the first edit's
 32-bar intro took a minute to reach the groove and felt slow off the top.
@@ -546,7 +556,7 @@ needs the speed.
 | **Open hat** | Every off-beat 8th at -22 dB: a texture, not the pendulum -- the record's off-8th is empty above 7 kHz |
 | **Clave** | 2-3 son clave, wood block, in every section but the build; the last thing standing in the thin bars |
 | **Congas** | Two-bar tumbao: ghosts and slap on the low drum (D3, left), open tones on the high drum (A3, right); a rising low/high 16th roll into every 16-bar phrase |
-| **Cowbell, cascara** | Double tresillo on the bell (left), 2-3 cascara on the rim (right), drops only |
+| **Cowbell, cascara** | Double tresillo on the bell (left) from bar 12; 2-3 cascara on the rim (right) in the drops only, from bar 88 |
 | **Bongos** | Martillo, macho on the beats and hembra between, second drop |
 | **Bass** | Filtered saws over a sine, tumbao cell (fifth on 4, anticipation on 4-and), legato, sidechained 0.92; octave pop in the second half of every 8 |
 | **Sub** | Pure sine under the bass roots, also sidechained, mono |
@@ -554,7 +564,7 @@ needs the speed.
 | **Pad** | Supersaw, one long note per chord, sidechained 0.95 -- the audible pump |
 | **Montuno piano** | Chord tones up and back in octaves on the clave, first 16 bars of the second drop |
 | **Horn hook** | Three-saw section, three stabs on the tresillo once every four bars, breakdown and drops |
-| **Electric piano** | Breakdown chords |
+| **Electric piano** | Breakdown chords; a three-hit riff (`keys`) in the second half of the groove and the last phrase of each drop |
 | **Vocal** | "eh / oh" chops on the clave's 3-side, formant-filtered, through the hall |
 | **FX** | Crash on every 32, reversed cymbal into every section, riser and snare roll in the build, sub drop on the drop |
 
@@ -633,7 +643,7 @@ now detects on a 4× oversampled copy, and the delivered MP3 decodes at
 python3 engine/tests.py
 ```
 
-44 checks covering the properties the mix depends on: that PolyBLEP actually
+45 checks covering the properties the mix depends on -- the last one is the every-8-bars arrangement rule -- that PolyBLEP actually
 suppresses aliasing, that the limiter never exceeds its ceiling and is exactly
 transparent below it, that filters attenuate where they claim to, that
 oversampling removes distortion aliasing, that the mono-maker centres the low

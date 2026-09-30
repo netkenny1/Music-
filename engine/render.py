@@ -164,6 +164,33 @@ def part_state(sec, key, local_bar):
     return has if has is not None else True
 
 
+# Every element the sequencer can switch on or off. `elements_at` reads the
+# arrangement exactly the way `sequence` does, so the arrangement can be
+# checked without rendering a note.
+ELEMENTS = ("kick", "hat", "hat16", "ohat", "clap", "shaker", "clave", "conga",
+            "cowbell", "cascara", "bongo", "bass", "stab", "pad", "keys_chords",
+            "keys_riff", "montuno", "brass", "vox", "snare_roll", "riser")
+
+
+def elements_at(bar):
+    """The set of elements playing in `bar` (thinned bars keep only C.THIN_KEEP)."""
+    for sec in C.SECTIONS:
+        if sec.start <= bar < sec.end:
+            lb = bar - sec.start
+            on = set()
+            for key in ELEMENTS:
+                if key == "hat16":
+                    h16 = sec.parts.get("hat16_from")
+                    if h16 is not None and lb >= h16 and part_state(sec, "hat", lb):
+                        on.add(key)
+                elif part_state(sec, key, lb):
+                    on.add(key)
+            if lb in sec.parts.get("thin_bars", ()):
+                on &= C.THIN_KEEP
+            return on
+    return set()
+
+
 def pattern_hits(name, swing_ok=True):
     """Yield (step, velocity) for each hit in a named 16-step pattern."""
     pat = C.P[name]

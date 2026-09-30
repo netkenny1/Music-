@@ -287,7 +287,9 @@ def build_sections():
 
     Every part enters or leaves on a phrase boundary. A DJ counts in
     phrases and a crowd hears in phrases; an element arriving on bar 13
-    reads as a mistake.
+    reads as a mistake. And no 8-bar phrase repeats the one before it:
+    at every 8th bar at least one element enters or leaves
+    (`tests.py` checks this against `render.elements_at`).
     """
     S = []
     b = 0
@@ -310,12 +312,14 @@ def build_sections():
         cowbell_from=12,
         filter_sweep=(1800, 20000), crash_at=[0])
 
-    # --- 32 bars: the groove. Everything in, the pad from the downbeat;
-    # the vocal chops from bar 8. Fills at 7, 15, 23, 31. -----------------
+    # --- 32 bars: the groove. Something changes every 8 bars: the full
+    # groove at 0, the vocal chops at 8, the electric-piano riff at 16, and
+    # the organ stab out at 24 so the last phrase opens up into the break.
+    # Fills at 7, 15, 23, 31. ----------------------------------------------
     add("main_a", 32, 0.85,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True, clave=True,
         conga=True, cowbell=True, bass="bass_tumbao", sub_layer=True,
-        stab=True, pad=True, vox_from=8,
+        stab=True, stab_until=24, pad=True, vox_from=8, keys_riff_from=16,
         crash_at=[0, 16], bounce_second_half=True)
 
     # --- 16 bars: breakdown. Drums out; the clave and conga keep talking
@@ -335,22 +339,26 @@ def build_sections():
         filter_sweep=(6000, 20000), silence_from=(15, 12),
         reverse_crash_at=[15])
 
-    # --- 32 bars: THE DROP. Full groove, tumbao bass, cowbell, cascara,
-    # the horn hook every four bars, sub drop on the downbeat. -------------
+    # --- 32 bars: THE DROP. Full groove, tumbao bass, cowbell, the horn
+    # hook every four bars and the sub drop on the downbeat; then one layer
+    # more every 8 bars -- the cascara at 8, the vocal chops at 16, the
+    # electric-piano riff at 24. -------------------------------------------
     add("drop", 32, 1.00,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True, clave=True,
-        conga=True, cowbell=True, cascara=True, brass=True,
-        bass="bass_tumbao", sub_layer=True, stab=True, pad=True, vox=True,
+        conga=True, cowbell=True, cascara_from=8, brass=True,
+        bass="bass_tumbao", sub_layer=True, stab=True, pad=True, vox_from=16,
+        keys_riff_from=24,
         crash_at=[0, 16], sub_drop=True, bounce_second_half=True)
 
-    # --- 32 bars: second drop. The montuno piano is the new element
-    # (0-15), bongos join. 16-23 thin out (kick, bass, clave, pad), 24-31
-    # everything back for the last run. -----------------------------------
+    # --- 32 bars: second drop. The montuno piano replaces the electric
+    # piano (0-15), the bongos join at 8, 16-23 thin out (kick, bass,
+    # clave, pad), 24-31 everything back with the electric piano in place
+    # of the montuno for the last run. -------------------------------------
     add("drop_b", 32, 1.00,
         kick=True, hat="hat", ohat=True, clap=True, shaker=True, clave=True,
-        conga=True, cowbell=True, cascara=True, bongo=True, brass=True,
+        conga=True, cowbell=True, cascara=True, bongo_from=8, brass=True,
         bass="bass_tumbao", sub_layer=True, stab=True, pad=True, vox=True,
-        montuno=True, montuno_until=16,
+        montuno=True, montuno_until=16, keys_riff_from=24,
         thin_bars=range(16, 24),
         crash_at=[0, 16, 24], bounce_second_half=True)
 

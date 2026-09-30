@@ -274,6 +274,18 @@ def test_panning():
         check(f"constant power at pan={p:+.1f}", abs(pw - power) < 1e-9)
 
 
+def test_arrangement():
+    """Something enters or leaves at every 8-bar phrase boundary."""
+    print("\narrangement")
+    import composition as C
+    import render as R
+    static = [b for b in range(8, C.TOTAL_BARS, 8)
+              if R.elements_at(b) == R.elements_at(b - 8)]
+    check("every 8-bar phrase adds or removes an element", not static,
+          f"static at bars {static}" if static else
+          f"{C.TOTAL_BARS // 8 - 1} boundaries all change")
+
+
 def main():
     print("=" * 64)
     print("DSP ENGINE VALIDATION")
@@ -287,6 +299,7 @@ def main():
     test_space()
     test_loudness()
     test_panning()
+    test_arrangement()
 
     print("\n" + "=" * 64)
     if FAILURES:
