@@ -185,7 +185,7 @@ def width(x, amount=1.0):
     return from_mid_side(m, s * amount)
 
 
-def mono_below(x, fc=120.0, sr=SR):
+def mono_below(x, fc=120.0, sr=SR, poles=4):
     """
     Collapse everything below `fc` to mono, leave the rest untouched.
 
@@ -194,9 +194,16 @@ def mono_below(x, fc=120.0, sr=SR):
     channels they partially cancel on a mono-summed club subwoofer, and the
     track loses its bottom end exactly where it matters most. Vinyl cutting
     lathes require it too.
+
+    The side signal is removed with a 24 dB/oct filter by default, not 12.
+    A gentle slope is the wrong tool here: an octave below a 120 Hz crossover,
+    12 dB/oct still leaves about -14 dB of side content, so the very lowest
+    octave -- the part that matters most -- stays partly stereo. Doubling the
+    slope puts that residue around -30 dB, which is genuinely mono.
     """
     m, s = mid_side(x)
-    s = F.apply(s, F.highpass(fc, 0.707, sr))   # remove side energy below fc
+    s = F.hp24(s, fc, 0.707, sr) if poles >= 4 else \
+        F.apply(s, F.highpass(fc, 0.707, sr))
     return from_mid_side(m, s)
 
 

@@ -143,11 +143,17 @@ def correlation(x):
 
 
 def mono_compatibility_db(x):
-    """How much level is lost when the mix is summed to mono. More than about
-    1.5 dB means phase cancellation is eating the mix on club systems."""
-    st = np.sqrt(np.mean(x ** 2))
+    """
+    Level change when the mix is summed to mono.
+
+    Reference is the RMS of an average channel, so two identical channels read
+    exactly 0.0 dB and anti-phase channels read -inf. Anything below about
+    -1.5 dB means phase cancellation is eating the mix on club systems, where
+    the subwoofer feed is almost always a mono sum.
+    """
+    ref = np.sqrt(np.mean(x ** 2))                     # mean over both channels
     mono = np.sqrt(np.mean(((x[:, 0] + x[:, 1]) * 0.5) ** 2))
-    return 20.0 * np.log10(max(mono, 1e-12) / max(st / np.sqrt(2), 1e-12))
+    return 20.0 * np.log10(max(mono, 1e-12) / max(ref, 1e-12))
 
 
 def bass_correlation(x, sr=SR, fc=120.0):
@@ -155,6 +161,20 @@ def bass_correlation(x, sr=SR, fc=120.0):
     from dsp import filters as F
     lo = F.apply(x, F.lowpass(fc, 0.707, sr))
     return correlation(lo)
+
+
+def high_correlation(x, sr=SR, fc=300.0):
+    """
+    Correlation above `fc`.
+
+    Overall correlation is a poor width gauge for dance music: the low end
+    carries most of the energy and is deliberately mono, which drags the
+    figure toward +1 no matter how wide the rest is. Measuring only the range
+    that is *allowed* to be wide shows what the listener actually perceives.
+    """
+    from dsp import filters as F
+    hi = F.apply(x, F.highpass(fc, 0.707, sr))
+    return correlation(hi)
 
 
 # --------------------------------------------------------------------------
@@ -190,6 +210,7 @@ def report(x, sr=SR, name="master"):
              f"  crest factor     {crest_factor_db(x):8.2f} dB",
              f"  correlation      {correlation(x):8.2f}",
              f"  bass correlation {bass_correlation(x, sr):8.2f}",
+             f"  high correlation {high_correlation(x, sr):8.2f}",
              f"  mono sum delta   {mono_compatibility_db(x):8.2f} dB",
              "  spectral balance:"]
     for n, lo, hi, d in band_energy(x, sr):

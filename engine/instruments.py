@@ -95,16 +95,18 @@ def clap(sr=SR, seed=23, bright=1.0):
     return fade(out, sr, 0.0003, 0.02)
 
 
-def snare(sr=SR, dur=0.24, tune=185.0, seed=31, snap=1.0):
-    """Snare for build-up rolls: tonal shell + noise wires."""
+def snare(sr=SR, dur=0.24, tune=196.0, seed=31, snap=1.0):
+    """Snare for build-up rolls: tonal shell + noise wires. The shell is
+    tuned to G3 with its partial a fifth up (D4), both in D minor, so a
+    32-hit roll into the drop never rubs against the chord under it."""
     n = int(dur * sr)
-    shell = (sine(tune, n, sr) + sine(tune * 1.48, n, sr) * 0.6) * \
+    shell = (sine(tune, n, sr) + sine(tune * 1.5, n, sr) * 0.6) * \
         perc_env(n, sr, 0.0005, 0.075, 4.5)
     wires = F.bandlimit(noise(n, seed=seed), 1500.0, 10000.0, sr) * \
         perc_env(n, sr, 0.0004, 0.10, 3.6)
     out = shell * 0.55 + wires * 0.75 * snap
     out = D.saturate(out, 1.5, "tanh", sr, oversample=2)
-    out = F.chain(out, F.highpass(150.0, 0.707, sr), F.peaking(3200.0, 3.0, 1.3))
+    out = F.chain(out, F.highpass(150.0, 0.707, sr), F.peaking(3136.0, 3.0, 1.3))
     return fade(out, sr, 0.0003, 0.012)
 
 
@@ -142,10 +144,11 @@ def shaker(sr=SR, dur=0.09, seed=57):
     return fade(x * perc_env(n, sr, 0.004, dur * 0.4, 3.0), sr, 0.002, 0.008)
 
 
-def rim(sr=SR, dur=0.10, tune=420.0, seed=61):
-    """Rimshot/click percussion for off-grid groove accents."""
+def rim(sr=SR, dur=0.10, tune=440.0, seed=61):
+    """Rimshot/click percussion for off-grid groove accents: A4 with its
+    overtone on C6 -- the fifth and the seventh of D minor."""
     n = int(dur * sr)
-    tone = (sine(tune, n, sr) + square(tune * 2.31, n, sr) * 0.35) * \
+    tone = (sine(tune, n, sr) + square(tune * 2.378, n, sr) * 0.35) * \
         perc_env(n, sr, 0.0003, 0.016, 7.0)
     nz = F.bandlimit(noise(n, seed=seed), 1800.0, 8000.0, sr) * \
         perc_env(n, sr, 0.0002, 0.010, 8.0)
@@ -234,7 +237,7 @@ def reese(freq, dur, sr=SR, cutoff=700.0, detune=22.0, seed=89):
 # Harmony
 # ==========================================================================
 
-def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
+def stab(freqs, dur, sr=SR, cutoff=3000.0, res=1.35, decay=0.22,
          detune=11.0, voices=3, spread=0.85, drive=1.25, seed=97,
          attack=0.004, sustain=0.25):
     """
@@ -257,7 +260,12 @@ def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
     left /= np.sqrt(len(freqs))
     right /= np.sqrt(len(freqs))
 
-    fenv = cutoff * (0.30 + 1.0 * perc_env(n, sr, 0.003, 0.055, 4.5))
+    # The floor matters more than the peak. At 0.30 the filter settled at
+    # under a third of the cutoff for most of every note, so the chord
+    # spent its sustain below 1.5 kHz and vanished from the mix the moment
+    # the transient passed. 0.45 keeps the body present without losing the
+    # snap that makes it a stab rather than a pad.
+    fenv = cutoff * (0.52 + 0.90 * perc_env(n, sr, 0.003, 0.055, 4.5))
     fenv = np.clip(fenv, 120.0, 0.45 * sr)
     left = F.sweep_lowpass(left, fenv, res, sr, poles=4)
     right = F.sweep_lowpass(right, fenv, res, sr, poles=4)
@@ -267,6 +275,58 @@ def stab(freqs, dur, sr=SR, cutoff=2400.0, res=1.35, decay=0.22,
     out = D.saturate(out, drive, "tanh", sr, oversample=2)
     # Chords never need energy below ~150 Hz -- that space belongs to kick+bass.
     out = F.apply(out, F.highpass(165.0, 0.707, sr))
+    return np.stack([fade(out[:, 0], sr), fade(out[:, 1], sr)], axis=-1)
+
+
+def organ(freqs, dur, sr=SR, decay=0.30, sustain=0.30, click=1.0,
+          seed=211):
+    """
+    Drawbar organ stab -- the house chord sound.
+
+    A tonewheel organ is additive: each drawbar is a sine at a harmonic of
+    the key, and the registration (which drawbars are out) *is* the tone.
+    This one is the classic 888000000-ish house setting: strong sub-octave,
+    fundamental, fifth and octave, with a little 2nd/3rd harmonic
+    "percussion" on the attack, which is the click that lets an organ chord
+    cut through a kick. Sines have no upper harmonics to fight the hats,
+    which is why organ stabs sit in a house mix where saw chords smear.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / sr
+    # (harmonic ratio, level): 16', 8', 5-1/3', 4', 2-2/3', 2', 1-3/5', 1'
+    # The upper drawbars (4th-6th harmonics: 1.5-2.4 kHz over a G4 top
+    # voice) are pulled further out than a "warm" registration would have
+    # them, because that band is otherwise empty in this mix.
+    drawbars = [(0.5, 0.30), (1.0, 1.00), (1.5, 0.40), (2.0, 0.70),
+                (3.0, 0.35), (4.0, 0.55), (5.0, 0.28), (6.0, 0.28), (8.0, 0.10)]
+    # slow vibrato, like a Leslie on chorale: 6 Hz, a few cents
+    vib = 1.0 + 0.0025 * np.sin(2 * np.pi * 6.1 * t + rng.random() * 6.28)
+
+    left = np.zeros(n)
+    right = np.zeros(n)
+    for i, f in enumerate(freqs):
+        tone = np.zeros(n)
+        for ratio, g in drawbars:
+            tone += sine(f * ratio * vib, n, sr, phase0=rng.random()) * g
+        perc = (sine(f * 2.0, n, sr) * 0.5 + sine(f * 3.0, n, sr) * 0.5) * \
+            perc_env(n, sr, 0.0008, 0.075, 4.0) * click
+        v = tone + perc * 0.8
+        # each note leans to its own side, low notes centre, high notes wider
+        p = (-0.5 + i / max(1, len(freqs) - 1)) * 0.5
+        left += v * np.cos((p + 1) * np.pi / 4)
+        right += v * np.sin((p + 1) * np.pi / 4)
+    g = 1.0 / np.sqrt(len(freqs) * 2.5)
+    amp = adsr(n, sr, a=0.003, d=decay, s=sustain, r=min(0.12, dur * 0.3), curve=2.4)
+    out = stereo(left * g * amp, right * g * amp)
+    # key click: a couple of milliseconds of filtered noise
+    clk = F.bandlimit(noise(n, seed=seed + 1), 2500.0, 8000.0, sr) * \
+        perc_env(n, sr, 0.0003, 0.004, 8.0) * 0.25 * click
+    out = out + clk[:, None]
+    out = D.saturate(out, 1.4, "tube", sr, oversample=2)
+    # 100, not 150: the 16' drawbar of the lowest voice sits at 100-130 Hz
+    # and is most of what makes an organ chord sound warm under a bassline.
+    out = F.apply(out, F.highpass(100.0, 0.707, sr))
     return np.stack([fade(out[:, 0], sr), fade(out[:, 1], sr)], axis=-1)
 
 
@@ -421,8 +481,9 @@ def reverse_crash(dur=1.9, sr=SR, seed=157):
     return fade(c[::-1].copy(), sr, 0.02, 0.004)
 
 
-def sub_drop(dur=1.4, sr=SR, f0=110.0, f1=32.0, seed=163):
-    """Deep pitch-falling sine to underline a drop."""
+def sub_drop(dur=1.4, sr=SR, f0=110.0, f1=36.71, seed=163):
+    """Deep pitch-falling sine to underline a drop; it falls from A2 and
+    settles on D1, the root of the key, not a random sub rumble."""
     n = int(dur * sr)
     t = np.arange(n) / sr
     f = f1 + (f0 - f1) * np.exp(-t / (dur * 0.28))
@@ -441,3 +502,272 @@ def noise_sweep(dur, sr=SR, up=True, seed=167, lo=300.0, hi=12000.0):
     x = F.apply(x, F.highpass(250.0, 0.707, sr))
     env = np.sin(np.pi * prog) ** 1.3
     return fade(x * env, sr, 0.01, 0.02)
+
+
+# ==========================================================================
+# Beat repeat
+# ==========================================================================
+
+def stutter(src, sr=SR, step_seconds=0.12, schedule=None, pitch_rise=0.0,
+            gain_rise=0.45, fade=0.0025):
+    """
+    Beat-repeat: retrigger the head of `src` at accelerating intervals.
+
+    Each repeat replays the *attack* of the source, not a continuation of it,
+    which is what makes a stutter read as a machine seizing rather than a
+    performance. `schedule` gives slice lengths in 16th notes; an accelerating
+    schedule means every repeat arrives sooner than predicted, so prediction
+    error accumulates across the fill instead of resetting each time. The
+    downbeat that finally lands resolves all of it at once.
+
+    `pitch_rise` reads the source progressively faster, lifting the pitch as
+    the fill tightens -- a second, independent rising cue layered on the first.
+    """
+    if schedule is None:
+        schedule = [1.0, 1.0, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25]
+
+    mono = src.ndim == 1
+    total = int(sum(schedule) * step_seconds * sr) + 128
+    out = np.zeros(total) if mono else np.zeros((total, 2))
+    src_idx = np.arange(len(src))
+
+    pos = 0
+    last = max(1, len(schedule) - 1)
+    for i, d in enumerate(schedule):
+        n = int(d * step_seconds * sr)
+        if n < 8:
+            continue
+        prog = i / last
+        rate = 1.0 + pitch_rise * prog
+        read = np.arange(n) * rate
+
+        if mono:
+            sl = np.interp(read, src_idx, src, left=0.0, right=0.0)
+        else:
+            sl = np.stack([np.interp(read, src_idx, src[:, c], left=0.0, right=0.0)
+                           for c in range(2)], axis=-1)
+
+        f = min(int(fade * sr), max(1, n // 4))
+        env = np.ones(n)
+        env[:f] = np.linspace(0.0, 1.0, f)
+        env[-f:] = np.linspace(1.0, 0.0, f)
+        g = 1.0 + gain_rise * prog
+
+        sl = sl * (env if mono else env[:, None]) * g
+        end = min(pos + n, total)
+        out[pos:end] += sl[:end - pos]
+        pos += n
+
+    return out
+
+
+# ==========================================================================
+# Percussion and layers added for fullness and bounce
+# ==========================================================================
+
+def tambourine(sr=SR, dur=0.16, seed=173, bright=1.0):
+    """
+    Tambourine: a cluster of jingles, not one hit.
+
+    Six or seven zils landing 2-4 ms apart, each a narrow burst of bright
+    noise, plus a fast tremolo on the tail as the jingles keep rattling. It
+    lives above 5 kHz, so it fills the top without touching the hats' slot at
+    7-12 kHz -- the two read as different instruments rather than one hat.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    out = np.zeros(n)
+    t0 = 0.0
+    for k in range(7):
+        i = int(t0 * sr)
+        ln = n - i
+        if ln <= 0:
+            break
+        burst = noise(ln, seed=seed + k) * perc_env(ln, sr, 0.0003, 0.012, 6.0)
+        out[i:] += burst * rng.uniform(0.6, 1.0)
+        t0 += rng.uniform(0.002, 0.004)
+    t = np.arange(n) / sr
+    tail = noise(n, seed=seed + 40) * perc_env(n, sr, 0.004, dur * 0.5, 2.6)
+    tail *= 0.5 + 0.5 * np.sin(2 * np.pi * 38.0 * t)          # rattle
+    out += tail * 0.55
+    out = F.bandlimit(out, 5200.0 * bright, 14500.0, sr)
+    out /= max(float(np.max(np.abs(out))), 1e-9) / 0.9
+    return fade(out, sr, 0.0003, 0.01)
+
+
+def conga(sr=SR, high=True, seed=179, slap=False):
+    """
+    Conga: a pitched membrane with a fast pitch drop and a slap transient.
+
+    Three strokes. The *open tone* (`high`, the quinto) rings on A3; the
+    low drum (the tumba) on D3, the root. The *slap* is the same head struck
+    with cupped fingers: the membrane is choked, so the tone is a third as
+    long and the noise of the hand is most of the sound; it settles on C4.
+    A tumbao is the conversation between those strokes. All three sit at
+    140-450 Hz, under the stabs and above the bass, a slot nothing else here
+    occupies -- and all three are notes of D minor, so the drums play in key.
+    """
+    f0, f1, dur, tau = (385.0, 220.0, 0.26, 0.014) if high else \
+        (260.0, 146.83, 0.36, 0.014)
+    if slap:
+        f0, f1, dur, tau = (440.0, 257.5, 0.14, 0.008)   # reads as C4
+    n = int(dur * sr)
+    t = np.arange(n) / sr
+    f = f1 + (f0 - f1) * np.exp(-t / tau)
+    body = sine(f, n, sr) * perc_env(n, sr, 0.0006,
+                                     dur * (0.25 if slap else 0.55), 3.8)
+    slap_n = F.bandlimit(noise(n, seed=seed), 900.0 if not slap else 1300.0,
+                         4500.0 if not slap else 6500.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.009 if not slap else 0.014, 8.0)
+    out = (body * 0.85 + slap_n * 0.35) if not slap else \
+        (body * 0.55 + slap_n * 0.95)
+    out = D.saturate(out, 1.6, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(120.0, 0.707, sr))
+    return fade(out, sr, 0.0003, 0.012)
+
+
+def sub_note(freq, dur, sr=SR):
+    """
+    Pure sine sub under the bass. The bass voice is filtered saw plus sine;
+    on a big system a clean sine an octave below its harmonics is what the
+    chest feels. Soft edges so it never clicks against the kick.
+    """
+    n = int(dur * sr)
+    x = sine(freq, n, sr) * adsr(n, sr, a=0.012, d=0.05, s=0.9, r=0.06, curve=1.5)
+    return fade(x, sr, 0.004, 0.02)
+
+
+# ==========================================================================
+# Latin percussion and the Latin-tech voices
+# ==========================================================================
+
+def cowbell(sr=SR, dur=0.28, seed=181, tune=1.0):
+    """
+    Cowbell: the 808 recipe, two square waves a non-integer ratio apart.
+
+    D5 and A5 (587 and 880 Hz, a fifth) -- the 808 used 540/800, which lands
+    between C# and D and between G and G#; tuned to the key's root and fifth
+    the bell clanks without rubbing. A band-pass keeps it out of the bass
+    and the hats, and a resonance on D7 (2.35 kHz) is the mouth of the
+    bell. It is the loudest thing in a salsa rhythm section for a reason:
+    nothing else cuts a room like it.
+    """
+    n = int(dur * sr)
+    x = (square(587.33 * tune, n, sr) + square(880.0 * tune, n, sr)) * 0.5
+    x = F.bandlimit(x, 380.0, 6000.0, sr, q=0.9)
+    x = F.apply(x, F.peaking(2349.3, 3.0, 1.5, sr))
+    env = perc_env(n, sr, 0.0005, dur * 0.5, 4.5)
+    clk = F.bandlimit(noise(n, seed=seed), 1500.0, 6000.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.006, 8.0) * 0.3
+    out = D.saturate(x * env + clk, 1.8, "tanh", sr, oversample=2)
+    return fade(out, sr, 0.0003, 0.012)
+
+
+def clave(sr=SR, dur=0.12, tune=2349.32, seed=191):
+    """
+    Clave / wood block: a damped high sine with one inharmonic partial and
+    a click, tuned to D7 with the partial on A7. Thirty-five milliseconds
+    long. It is the timeline every Latin
+    part is phrased against, so it must be short enough to never blur.
+    """
+    n = int(dur * sr)
+    body = (sine(tune, n, sr) + sine(tune * 1.4983, n, sr) * 0.4) * \
+        perc_env(n, sr, 0.0003, 0.035, 5.5)
+    clk = F.bandlimit(noise(n, seed=seed), 2000.0, 9000.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.004, 9.0) * 0.5
+    out = F.apply(body + clk, F.highpass(800.0, 0.707, sr))
+    return fade(out, sr, 0.0002, 0.008)
+
+
+def bongo(sr=SR, high=True, seed=193):
+    """
+    Bongo: a small, tight head. The macho (high) on A4, the hembra (low)
+    on D4, both with a faster pitch drop and shorter ring than a
+    conga, so a martillo pattern reads as a rattle over the tumbao rather
+    than a second tumbao.
+    """
+    f0, f1, dur = (660.0, 440.0, 0.14) if high else (392.0, 293.66, 0.18)
+    n = int(dur * sr)
+    t = np.arange(n) / sr
+    f = f1 + (f0 - f1) * np.exp(-t / 0.006)
+    body = sine(f, n, sr) * perc_env(n, sr, 0.0004, dur * 0.5, 4.5)
+    slap = F.bandlimit(noise(n, seed=seed), 1500.0, 7000.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.006, 9.0)
+    out = D.saturate(body * 0.8 + slap * 0.4, 1.5, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(200.0, 0.707, sr))
+    return fade(out, sr, 0.0003, 0.010)
+
+
+def horn(freqs, dur, sr=SR, seed=223, cutoff=2600.0, attack=0.022):
+    """
+    Horn section stab.
+
+    Three detuned saws per note (a section, not a soloist), a filter that
+    opens over the first 100 ms -- the "wah" of a brass attack, the bell
+    blooming after the tongue -- and a vibrato that develops after the
+    onset rather than being there from the start, which is how a player
+    actually does it. A resonance at 1.1 kHz is the formant that makes it
+    read as brass rather than as a saw chord.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+    t = np.arange(n) / sr
+    vib = 1.0 + 0.0045 * np.sin(2 * np.pi * 5.6 * t + rng.random() * 6.28) * \
+        (1.0 - np.exp(-t / 0.13))
+    left = np.zeros(n)
+    right = np.zeros(n)
+    for i, f in enumerate(freqs):
+        v = np.zeros(n)
+        for d in (-9.0, 0.0, 9.0):
+            v += saw(f * cents(d) * vib, n, sr, phase0=rng.random())
+        v /= 3.0
+        p = (-0.5 + i / max(1, len(freqs) - 1)) * 0.6
+        left += v * np.cos((p + 1) * np.pi / 4)
+        right += v * np.sin((p + 1) * np.pi / 4)
+    g = 1.0 / np.sqrt(len(freqs))
+    fenv = cutoff * (0.55 + 0.9 * perc_env(n, sr, attack, 0.12, 3.0))
+    fenv = np.clip(fenv, 200.0, 0.45 * sr)
+    left = F.sweep_lowpass(left * g, fenv, 1.5, sr, poles=4)
+    right = F.sweep_lowpass(right * g, fenv, 1.5, sr, poles=4)
+    amp = adsr(n, sr, a=attack, d=0.08, s=0.8, r=min(0.10, dur * 0.3), curve=2.0)
+    out = stereo(left * amp, right * amp)
+    out = F.chain(out, F.peaking(1100.0, 5.0, 1.2, sr), F.peaking(2600.0, 2.5, 1.4, sr))
+    out = D.saturate(out, 1.8, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(180.0, 0.707, sr))
+    return np.stack([fade(out[:, 0], sr, 0.002, 0.01),
+                     fade(out[:, 1], sr, 0.002, 0.01)], axis=-1)
+
+
+def piano(freq, dur, sr=SR, seed=229, bright=1.0, octaves=True):
+    """
+    Montuno piano: a bright, hard-struck upright.
+
+    Three strings per note detuned by a cent and a half (the unison beat
+    that makes a piano shimmer), a saw for the upper harmonics over a sine
+    fundamental, a hammer click, and a tone filter that closes as the note
+    decays -- a struck string loses its high partials first. `octaves`
+    doubles the note an octave up: a montuno is played in octaves so it
+    cuts through a horn section, and here through a kick.
+    """
+    n = int(dur * sr)
+    rng = np.random.default_rng(seed)
+
+    def string(f):
+        return (saw(f, n, sr, phase0=rng.random()) * 0.45 +
+                sine(f, n, sr, phase0=rng.random()) * 0.6 +
+                sine(f * 2.0, n, sr, phase0=rng.random()) * 0.25 +
+                sine(f * 3.0, n, sr, phase0=rng.random()) * 0.12)
+
+    x = (string(freq * cents(-1.5)) + string(freq) + string(freq * cents(1.5))) / 3.0
+    if octaves:
+        x = x * 0.72 + (string(freq * 2.0 * cents(-1.0)) +
+                        string(freq * 2.0 * cents(1.0))) / 2.0 * 0.5
+    fenv = (4200.0 * bright) * (0.35 + 1.0 * perc_env(n, sr, 0.001, 0.25, 2.5))
+    x = F.sweep_lowpass(x, np.clip(fenv, 300.0, 0.45 * sr), 0.8, sr, poles=2)
+    hammer = F.bandlimit(noise(n, seed=seed), 2500.0, 8000.0, sr) * \
+        perc_env(n, sr, 0.0002, 0.004, 8.0) * 0.18
+    env = perc_env(n, sr, 0.0015, max(0.12, dur * 0.9), 2.4)
+    out = x * env + hammer
+    out = D.saturate(out, 1.3, "tube", sr, oversample=2)
+    out = F.apply(out, F.highpass(150.0, 0.707, sr))
+    return fade(out, sr, 0.001, 0.015)

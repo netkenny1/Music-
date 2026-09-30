@@ -2,5 +2,7 @@ __pycache__/
 *.pyc
 output/
 *.wav
-*.mp3
 *.flac
+
+# the rendered MP3 is committed deliberately (see output/)
+!output/midnight_transit.mp3
